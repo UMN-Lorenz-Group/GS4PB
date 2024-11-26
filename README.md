@@ -1,4 +1,4 @@
-# GS4PB (Previously SoyGen2 (Science Optimized Yield Gains Across Environments - V2) 
+# GS4PB (Previously SoyGen2 : Science Optimized Yield Gains Across Environments - V2) 
 ## An R shiny application to implement a genomic selection pipeline from quality control of genotypic data to making genomic predictions 
 ![PipelinePic_for_Wiki_V2](https://github.com/UMN-Lorenz-Group/SoyGen2App/assets/12753252/5e76c000-bf4e-4849-bbad-29df6a6fb22e)
  

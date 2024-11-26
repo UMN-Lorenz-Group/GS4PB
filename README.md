@@ -23,9 +23,9 @@
 
 
 
-### III) Test it on gesis notebook binder by clicking the 'launch binder' icon 
+### IV) Test it on gesis notebook binder by clicking the 'launch binder' icon 
 #### (Since this is a public notebook binder meant for demos, it is not updated frequently and may take a long time to start)
 [![Binder](https://mybinder.org/badge_logo.svg)](https://notebooks.gesis.org/binder/v2/gh/UMN-Lorenz-Group/SoyGen2App/main?urlpath=rstudio)
 
-### IV) For detailed documentation, check out the wiki page here:  
-https://github.com/UMN-Lorenz-Group/SoyGen2App/wiki
+### V) For detailed documentation, check out the wiki page here:  
+https://github.com/UMN-Lorenz-Group/GS4PB/wiki

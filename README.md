@@ -6,10 +6,17 @@
 #### 1) Install docker engine in your system and make sure that is running. You can download and install the docker engine for your OS from here: https://docs.docker.com/engine/install/. Once you install it, make sure the docker engine is running when you run the docker commands. An intro to running docker containers can be found in this short video: https://docs.docker.com/get-started/introduction/get-docker-desktop/.
 #### 2) docker pull ivanvishnu/gs4pb:updated
 #### 3) Run docker 
-#### &nbsp; &nbsp; a) On gitbash: i) winpty docker run --mount type=bind,source=$HOME/Downloads/,target=/root/Results -it -p 3838:3838 gs4pbdock:UpV
-#### &nbsp; &nbsp; &nbsp; &nbsp; ii) winpty docker run -it -p 3838:3838 gs4pbdock:UpV
+#### &nbsp; &nbsp; a) On gitbash for mounting local directory (change source argument to your target directory) 
+#### &nbsp; &nbsp; &nbsp; &nbsp; i) winpty docker run --mount type=bind,source=$HOME/Downloads/,target=/root/Results -it -p 3838:3838 gs4pbdock:UpV
+
+#### &nbsp; &nbsp; &nbsp; &nbsp; On gitbash without local host directory binding  
+#### &nbsp; &nbsp; &nbsp; &nbsp ii) winpty docker run -it -p 3838:3838 gs4pbdock:UpV 
+
+#### &nbsp; &nbsp; &nbsp; &nbsp Copy Results to your local directory using: 
+#### &nbsp; &nbsp; &nbsp; &nbsp docker cp <container name>:/root/Results/ $HOME/Downloads/
 
 #### &nbsp; &nbsp;  b) On other systems: docker run --mount type=bind,source=$HOME/Downloads/,target=/root/Results -it -p 3838:3838 gs4pbdock:UpV 
+
 #### 4) Access through the local link: http://localhost:3838/
 
 

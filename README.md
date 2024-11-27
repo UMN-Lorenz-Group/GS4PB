@@ -7,17 +7,17 @@
 #### 2) docker pull ivanvishnu/gs4pb:updated
 #### 3) Run docker 
 #### &nbsp; &nbsp; a) On gitbash for mounting local directory (change source argument to your target directory) 
-#### &nbsp; &nbsp; &nbsp; &nbsp; i) winpty docker run --mount type=bind,source=$HOME/Downloads/,target=/root/Results -it -p 3838:3838 gs4pbdock:UpV
+#### &nbsp; &nbsp; &nbsp; &nbsp; i) winpty docker run --mount type=bind,source=$HOME/Downloads/,target=/root/Results -it -p 3838:3838 ivanvishnu/gs4pb:updated
 
 #### &nbsp; &nbsp; &nbsp; &nbsp; On gitbash without local host directory binding  
-#### &nbsp; &nbsp; &nbsp; &nbsp ii) winpty docker run -it -p 3838:3838 gs4pbdock:UpV 
+#### &nbsp; &nbsp; &nbsp; &nbsp; ii) winpty docker run -it -p 3838:3838 ivanvishnu/gs4pb:updated
 
-#### &nbsp; &nbsp; &nbsp; &nbsp Copy Results to your local directory using: 
-#### &nbsp; &nbsp; &nbsp; &nbsp docker cp <container name>:/root/Results/ $HOME/Downloads/
+#### &nbsp; &nbsp; &nbsp; &nbsp; Copy Results to your local directory using: 
+#### &nbsp; &nbsp; &nbsp; &nbsp; docker cp <container name>:/root/Results/ $HOME/Downloads/
 
-#### &nbsp; &nbsp;  b) On other systems: docker run --mount type=bind,source=$HOME/Downloads/,target=/root/Results -it -p 3838:3838 gs4pbdock:UpV 
+#### &nbsp; &nbsp;  b) On other systems: docker run --mount type=bind,source=$HOME/Downloads/,target=/root/Results -it -p 3838:3838 ivanvishnu/gs4pb:updated 
 
-#### 4) Access through the local link: http://localhost:3838/
+#### 4) Access app through the local link: http://localhost:3838/
 
 
 ### 

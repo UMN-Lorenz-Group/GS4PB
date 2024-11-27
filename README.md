@@ -59,7 +59,7 @@
 ---
 
 ### III. CyVerse Implementation
-(Details to be added if required.)
+(Details to be added.)
 
 ---
 

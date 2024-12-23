@@ -49,11 +49,18 @@
 
 ### Trial Data 
 1. Trial data for single environmental trial can be found here:
-   https://data.cyverse.org/dav-anon/iplant/home/umnlorenzgroup/SingleEnv_Trial_Data.zip
 
-2. Trial data for multi-environmental trials can be found here:
+   https://data.cyverse.org/dav-anon/iplant/home/umnlorenzgroup/SingleEnv_Trial_Data.zip
+   
+   This folder contains three files: Genotypic data file in VCF format, a '.csv' file
+   containing target line IDs and a phenotypic data file in '.csv' format. 
+
+3. Trial data for multi-environmental trials can be found here:
+
    https://data.cyverse.org/dav-anon/iplant/home/umnlorenzgroup/MultiEnv_Trial_Data.zip 
- 
+
+   The multi-environmental trial data folder contains three files: a genotypic data file in VCF format, a phenotypic data file in '.csv' format and
+   location coordinates file for retrieving enviromics (weather) data 
 
 ### II. Installing and Running the Application in RStudio
 

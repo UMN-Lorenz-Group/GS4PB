@@ -47,6 +47,14 @@
 
 ---
 
+### Trial Data 
+1. Trial data for single environmental trial can be found here:
+   https://data.cyverse.org/dav-anon/iplant/home/umnlorenzgroup/SingleEnv_Trial_Data.zip
+
+2. Trial data for multi-environmental trials can be found here:
+   https://data.cyverse.org/dav-anon/iplant/home/umnlorenzgroup/MultiEnv_Trial_Data.zip 
+ 
+
 ### II. Installing and Running the Application in RStudio
 
 1. Clone the repository using Git:  

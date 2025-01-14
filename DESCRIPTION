@@ -1,0 +1,65 @@
+Package: GS4PB
+Title: An Amazing Shiny App
+Version: 0.0.0.9000
+Authors@R: 
+    person(given = "firstname",
+           family = "lastname",
+           role = c("aut", "cre"),
+           email = "your@email.com")
+Description: What the package does (one paragraph).
+License: GPL (>= 3)
+Imports: 
+    attachment,
+    BGGE,
+    BGLR,
+    bWGR,
+    callr,
+    config,
+    covrpage,
+    desc,
+    devtools,
+    doParallel,
+    dplyr,
+    DT,
+    EnvRtype,
+    foreach,
+    fs,
+    geodata,
+    ggplot2,
+    golem,
+    gplots,
+    graphics,
+    grDevices,
+    htmlwidgets,
+    httpuv,
+    NAM,
+    nasapower,
+    parallel,
+    plotly,
+    plyr,
+    renv,
+    reshape2,
+    reticulate,
+    rhub,
+    rJava,
+    rrBLUP,
+    rsconnect,
+    rstudioapi,
+    rTASSEL,
+    shiny,
+    shinyBS,
+    shinyFiles,
+    shinyjs,
+    shinyWidgets,
+    sommer,
+    stats,
+    STPGA,
+    SummarizedExperiment,
+    terra,
+    tools,
+    usethis,
+    utils,
+    vcfR
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 7.3.2

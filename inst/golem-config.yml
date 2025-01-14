@@ -1,0 +1,15 @@
+default:
+  golem_name: GS4PB
+  golem_version: 0.0.0.9000
+  app_prod: no
+  java.parameters: "-Xmx30g"
+  error: "NULL"
+  virtualenv: "./renv/python/virtualenvs/renv-python-3.12"
+  maxRequestSize: 1048576000
+
+production:
+  app_prod: yes
+
+dev:
+  golem_wd: !expr golem::pkg_path()
+

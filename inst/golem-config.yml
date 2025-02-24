@@ -1,0 +1,14 @@
+default:
+  golem_name: GS4PB
+  golem_version: 0.0.0.9000
+  app_prod: no
+  java.parameters: "-Xmx30g"
+  error: "NULL"
+  maxRequestSize: 3000*1024^2 
+
+production:
+  app_prod: yes
+
+dev:
+  golem_wd: !expr golem::pkg_path()
+

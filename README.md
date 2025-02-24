@@ -77,6 +77,7 @@
    ```
 4. Build and install package in RStudio using the devtools package
    ```R
+   devtools::install_deps(dependencies = TRUE)
    devtools::document()
    # ℹ Updating GS4PB documentation
    # ℹ Loading GS4PB

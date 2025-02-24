@@ -1,0 +1,6 @@
+alphaplantimpute2 @ file:///C:/Users/ivanv/Desktop/UMN_GIT/GPSoy/AlphaPlantImpute2/alphaplantimpute2-1.5.3-py3-none-any.whl#sha256=d347010c6a0af3f71da0bf2e8a7247ac5542f61312abb4443552d9d87b679811
+llvmlite==0.43.0
+numba==0.60.0
+numpy==2.0.1
+setuptools==72.1.0
+wheel==0.44.0

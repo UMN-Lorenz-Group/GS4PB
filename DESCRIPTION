@@ -1,5 +1,5 @@
 Package: GS4PB
-Title: An Amazing Shiny App
+Title: App-package to implement a GS pipeline
 Version: 0.0.0.9000
 Authors@R: 
     person(given = "firstname",
@@ -7,59 +7,23 @@ Authors@R:
            role = c("aut", "cre"),
            email = "your@email.com")
 Description: What the package does (one paragraph).
-License: GPL (>= 3)
-Imports: 
-    attachment,
-    BGGE,
-    BGLR,
-    bWGR,
-    callr,
-    config,
-    covrpage,
-    desc,
-    devtools,
-    doParallel,
-    dplyr,
-    DT,
-    EnvRtype,
-    foreach,
-    fs,
-    geodata,
-    ggplot2,
-    golem,
-    gplots,
-    graphics,
-    grDevices,
-    htmlwidgets,
-    httpuv,
-    NAM,
-    nasapower,
-    parallel,
-    plotly,
-    plyr,
-    renv,
-    reshape2,
-    reticulate,
-    rhub,
-    rJava,
-    rrBLUP,
-    rsconnect,
-    rstudioapi,
-    rTASSEL,
-    shiny,
-    shinyBS,
-    shinyFiles,
-    shinyjs,
-    shinyWidgets,
-    sommer,
-    stats,
-    STPGA,
-    SummarizedExperiment,
-    terra,
-    tools,
-    usethis,
-    utils,
-    vcfR
+license: gpl (>= 3)
+imports: attachment, bgge, bglr, bwgr, callr, config, covrpage, desc,
+        devtools, doparallel, dplyr, dt, envrtype, foreach, fs,
+        geodata, ggplot2, golem, gplots, graphics, grdevices,
+        htmlwidgets, httpuv, nam, nasapower, parallel, plotly, plyr,
+        renv, reshape2, reticulate, rhub, rjava, rrblup, rsconnect,
+        rstudioapi, rtassel, shiny, shinybs, shinyfiles, shinyjs,
+        shinywidgets, sommer, stats, stpga, summarizedexperiment,
+        terra, tools, usethis, utils, vcfr, pandoc, rmarkdown, shinydashboard
 Encoding: UTF-8
-LazyData: true
+roxygennote: 7.3.2
+needscompilation: no
+packaged: 2025-01-15 06:25:12 utc; vramasub
+author: Vishnu Ramasubramanian [aut, cre]
+maintainer: firstname lastname <your@email.com>
+NeedsCompilation: no
+Packaged: 2025-02-10 23:42:45 UTC; vramasub
+Author: firstname lastname [aut, cre]
+Maintainer: firstname lastname <your@email.com>
 RoxygenNote: 7.3.2

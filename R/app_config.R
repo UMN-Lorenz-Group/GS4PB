@@ -8,9 +8,19 @@
 #' within your package. The default, none, returns the root of the app.
 #'
 #' @noRd
+
 app_sys <- function(...) {
-  system.file(..., package = "GS4PB")
+  # Ensure the resource path is set
+  golem::add_resource_path("www", system.file("app/www", package = "GS4PB"))
+  
+  # Retrieve the file path within the package
+  # If system.file() doesn't find the file, construct the path relative to inst/
+  file_path <- file.path(system.file(package = "GS4PB"),...)
+  
+  return(file_path)
 }
+
+
 
 #' Set Global Options
 #'
@@ -29,7 +39,7 @@ set_global_options <- function() {
 
   options(java.parameters = config$java.parameters)
   options(error = eval(parse(text = config$error)))
-  options(shiny.maxRequestSize = config$maxRequestSize)
+  options(shiny.maxRequestSize = eval(parse(text=config$maxRequestSize)))
 
 }
 
@@ -48,10 +58,10 @@ initialize_environment <- function() {
 
   config <- get(file = config_file)
 
-  use_virtualenv(
-    config$virtualenv,
-    required = TRUE
-  )
+   #  use_virtualenv(
+   #   config$virtualenv,
+   #  required = TRUE
+   #)
 }
 
 

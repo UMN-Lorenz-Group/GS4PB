@@ -176,7 +176,7 @@ split_chunk <- function(vec, length) {
 #' @param temporal.scale The temporal resolution of the data. Defaults to `"daily"`.
 #' @param country A vector of country codes (e.g., "USA", "BRA") for retrieving elevation data. If `NULL`, elevation data is not included.
 #' @param parallel Logical. If `TRUE`, enables parallel processing for faster data retrieval.
-#' @param workers Number of workers/cores to use for parallel processing. Defaults to 90% of available cores.
+#' @param workers Number of workers/cores to use for parallel processing. Defaults to 90\% of available cores.
 #' @param chunk_size Number of locations to process in each parallel chunk. Defaults to 29.
 #' @param sleep Time in seconds to wait between API requests. Defaults to 60.
 #'

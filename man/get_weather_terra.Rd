@@ -44,7 +44,7 @@ get_weather_terra(
 
 \item{parallel}{Logical. If `TRUE`, enables parallel processing for faster data retrieval.}
 
-\item{workers}{Number of workers/cores to use for parallel processing. Defaults to 90% of available cores.}
+\item{workers}{Number of workers/cores to use for parallel processing. Defaults to 90\% of available cores.}
 
 \item{chunk_size}{Number of locations to process in each parallel chunk. Defaults to 29.}
 

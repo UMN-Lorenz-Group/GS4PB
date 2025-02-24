@@ -4,8 +4,7 @@ default:
   app_prod: no
   java.parameters: "-Xmx30g"
   error: "NULL"
-  virtualenv: "./renv/python/virtualenvs/renv-python-3.12"
-  maxRequestSize: 1048576000
+  maxRequestSize: 3000*1024^2 
 
 production:
   app_prod: yes

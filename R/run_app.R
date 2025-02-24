@@ -18,7 +18,8 @@ run_app <- function(
 ) {
 	tryCatch({
 	  set_global_options()
-	  initialize_environment()
+	  #initialize_environment()
+          #setup_python()
 	}, error = function(e) {
 	  stop("Failed to initialize app environment: ", e$message)
 	})

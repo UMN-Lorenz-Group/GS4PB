@@ -68,11 +68,40 @@
    ```bash
    git clone https://github.com/UMN-Lorenz-Group/GS4PB.git
    ```
+2. Open Rstudio and navigate to the root of the package folder: cd GS4PB/
+3. Installation of this package requires 'conda'. In R
+   ```R
+   Sys.which("conda")
+   # If empty like "",
+   reticulate::install_miniconda()
+   ```
+4. Build and install package in RStudio using the devtools package
+   ```R
+   devtools::install_deps(dependencies = TRUE)
+   devtools::document()
+   # ℹ Updating GS4PB documentation
+   # ℹ Loading GS4PB
+   # Warning message:
+   #   In nsenv[[f_name]](dirname(ns_path), package) :
+   #   Conda environment not found. Run GS4PB:::setup_python_env() to create it.
+   ### Ignore this warning message for the time being and build the package
+   devtools::build()
+   devtools::install()
+   ```
+   On successful install, you will get a warning message: 
+   Warning in fun(libname, pkgname) :
+   Conda environment not found. Run GS4PB:::setup_python_env() to create it.
 
-2. Open the `App/app.R` file in RStudio and run the application.
-
-3. Follow the app’s guided instructions and move through the tabs for sequential implementation of pipeline steps.
-
+5. Setup python environment for the GS4PB package
+   ```R
+   library(GS4PB)
+   GS4PB:::setup_python_env()
+   ```
+6. Once this setup is complete, GS4PB shiny app can be run using the following command: 
+   ```R
+   GS4PB::run_app()
+   ```
+7. Follow the app’s guided instructions and move through the tabs for sequential implementation of pipeline steps.
 ---
 
 ### III. CyVerse Implementation

@@ -1,40 +1,5 @@
 
-##setup_python_env <- function(envname = "GS4PB_pyEnv", python_packages = c("numpy", "pandas")) {
-# 
-#  library(reticulate)
-#
-#  # Create virtual environment if not exists
-#  if (!virtualenv_exists(envname)) {
-#    virtualenv_create(envname)
-#  }
-#
-#  # Activate the environment
-#  use_virtualenv(envname, required = TRUE)
-#
-#  # Install required Python packages
-#  installed_pkgs <- py_list_packages()
-#  missing_pkgs <- setdiff(python_packages, installed_pkgs$package)
-#
-#  if (length(missing_pkgs) > 0) {
-#    message("Installing missing Python packages: ", paste(missing_pkgs, collapse = ", "))
-#    virtualenv_install(envname, missing_pkgs)
-#  }
-#
-#  # Install custom package from .whl or .tar.gz
-#  python_path <- system.file("python", package = "GS4PB")
-#  custom_package <- list.files(python_path, pattern = "\\.whl|\\.tar\\.gz$", full.names = TRUE)
-#  
-#  if (length(custom_package) > 0) {
-#    message("Installing custom Python package: ", custom_package)
-#    system(paste(shQuote(reticulate::py_exe()), "-m pip install", shQuote(custom_package)))
-#  }
-#
-#  message("Python environment setup complete.")
-#}
-#
-
-
-setup_python_env <- function(envname = "GS4PB_CondaEnv",python_version = "3.12", packages = c("numpy", "pandas","numba")) {
+setup_python_env <- function(envname = "GS4PB_CondaEnv",python_version = "3.12", packages = c("numba","libstdcxx-ng","numpy", "pandas")){
   library(reticulate)
    
 

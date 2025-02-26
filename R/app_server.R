@@ -572,18 +572,19 @@ output$messageGenoFilt1 <- renderText({
   nHap <- reactive(input$nHap)
   nSampRnds <- reactive(input$nSampRnds)
   HDthresh <- reactive(input$HDthresh)
-  
-  observeEvent(input$build_library,{
-    #browser()
-    # Extract necessary input values
+  processComplete <- reactiveVal(FALSE)
+   
+  rProcess <- eventReactive(input$build_library,{
     # Path for the temporary file
     temp_file(tempfile())
     
     # Start the process in a separate R process
-    rProcess <- callr::r_bg(function(nHap, nSampRnds, HDthresh, temp_file) {
+    callr::r_bg(function(nHap, nSampRnds, HDthresh, temp_file) {
       library(reticulate)
-      #reticulate::use_virtualenv("./pyEnv", required = TRUE)
-      reticulate::use_virtualenv("./renv/python/virtualenvs/renv-python-3.12", required = TRUE)
+      library(GS4PB)
+      # reticulate::use_virtualenv("./renv/python/virtualenvs/renv-python-3.12", required = TRUE)
+      
+      reticulate::use_condaenv("GS4PB_CondaEnv", required = TRUE)  
       
       sys <- reticulate::import("sys")
       api2 <- reticulate::import("alphaplantimpute2.alphaplantimpute2")
@@ -603,23 +604,56 @@ output$messageGenoFilt1 <- renderText({
       })
     }, args = list(nHap(), nSampRnds(), HDthresh(), temp_file()), stdout = temp_file(), stderr = temp_file())
     
-  
+  })
    
 ###
- 
-  
-  
   mssgAPIBuildOut <- reactiveVal(NULL)
- 
+  
+# Reactive expression to check process status and read temp file
+
+  processStatus <- reactive({
+
+    invalidateLater(1000, session)  # Check every second
+    if(!is.null(rProcess()) && !rProcess()$is_alive()) {
+      rProcess()$kill()  # Ensures the background process is terminated
+    }
+    # Check if the process is running
+
+    if(!is.null(rProcess()) && rProcess()$is_alive()) {
+      if(file.exists(temp_file())){
+        lines <- readLines(temp_file(), warn = FALSE)
+        return(paste(lines, collapse = "\n"))
+      }
+      return("Waiting for output...")
+    }
+    # Check if the process has completed
+    if(!is.null(rProcess()) && !rProcess()$is_alive()){
+      if(file.exists(temp_file())){
+        lines <- readLines(temp_file(), warn = FALSE)
+        txt <- paste(lines, collapse = "\n")
+        # Mark process as complete and update output
+        processComplete(TRUE)
+        shinyjs::enable("impute_APIdata")
+      	# Ensure the background process is terminated
+        mssgAPIBuildOut(paste(txt, "Build Completed", collapse = "\n"))
+        return(paste(txt, "Build Completed", collapse = "\n"))
+      }
+      return("Waiting for output...")
+    }
+    return("Error determining process status")
+ })
+
+
   ##
    output$message <- renderText({
      invalidateLater(1000, session)
      if(hapLibLoaded()) {
        mssgLibStats <- hapLibStats()
       return(mssgLibStats)
-     }
+     }else{
+       processStatus()      	
+     }	     
    })
-})
   
 ######   
   
@@ -645,7 +679,9 @@ output$messageGenoFilt1 <- renderText({
     # Start the process in a separate R process
     callr::r_bg(function(founder_file,temp_file){
       library(reticulate)
-      reticulate::use_virtualenv("./renv/python/virtualenvs/renv-python-3.12", required = TRUE)
+      library(GS4PB)
+      reticulate::use_condaenv("GS4PB_CondaEnv")
+      #reticulate::use_virtualenv("./renv/python/virtualenvs/renv-python-3.12", required = TRUE)
       sys <- import("sys")
       api2 <- import("alphaplantimpute2.alphaplantimpute2")
       
@@ -665,8 +701,6 @@ output$messageGenoFilt1 <- renderText({
       sink(temp_file)
       tryCatch({
         api2$main()
-         # Sys.sleep(20)
-         # cat("Test OK")
       }, finally = {
         sink(NULL)
       })

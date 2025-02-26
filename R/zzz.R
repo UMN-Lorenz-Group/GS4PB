@@ -3,8 +3,7 @@
 .onLoad <- function(libname, pkgname) {
   library(reticulate)
 
-  envname <- "GS4PB_pyEnv"
-
+  envname <- "GS4PB_CondaEnv"
   ## Activate Python virtual environment on package load
   #if (virtualenv_exists(envname)) {
    # use_virtualenv(envname, required = TRUE)

@@ -34,7 +34,7 @@
 #
 
 
-setup_python_env <- function(envname = "GS4PB_CondaEnv",python_version = "3.12", packages = c("numpy", "pandas")) {
+setup_python_env <- function(envname = "GS4PB_CondaEnv",python_version = "3.12", packages = c("numpy", "pandas","numba")) {
   library(reticulate)
    
 

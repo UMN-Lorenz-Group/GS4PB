@@ -47,6 +47,8 @@ app_ui <- function(request){
 	")) 
 
 ##
+ 
+
 
   dashboardPage(skin="black",
   dashboardHeader(title = "GS4PB App"),
@@ -85,6 +87,7 @@ app_ui <- function(request){
   ),
   
   dashboardBody(
+    useShinyjs(),	
     custom_css,  # Include custom CSS
     tabItems(
       tabItem(

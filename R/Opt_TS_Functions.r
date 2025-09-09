@@ -153,21 +153,19 @@ getOptimalTS <- function(Data_Table_Num_Filt_List,trait,nTraits,noCandidates,nTr
     system.time({
 	
 	  if(length(GAParameters$errorstat)==1){
-         Train_STPGA <- GenAlgForSubsetSelection(Pcs=PC99,Candidates,Test,ntoselect=nTrainToSelect,InitPop=GAParameters$InitPop,
-         npopGA=GAParameters$npop, nelite=GAParameters$nelite, mutprob=GAParameters$mutprob, mutintensity = GAParameters$mutintensity,
+         Train_STPGA <- GenAlgForSubsetSelection(P=PC99,Candidates,Test,ntoselect=nTrainToSelect,npop=GAParameters$npop, 
+		 nelite=GAParameters$nelite, mutprob=GAParameters$mutprob, mutintensity = GAParameters$mutintensity,
          niterations=GAParameters$niterations,minitbefstop=GAParameters$minitbefstop, tabu=GAParameters$tabu,
          tabumemsize = GAParameters$tabumemsize,plotiters=GAParameters$plotiters,errorstat=GAParameters$errorstat,
-		 lambda=GAParameters$lambda, mc.cores=GAParameters$mc.cores)
+		 lambda=GAParameters$lambda,InitPop=GAParameters$InitPop, mc.cores=GAParameters$mc.cores)
 		 
-	   }
-	   if(length(GAParameters$errorstat)>1){
+	   }else if(length(GAParameters$errorstat)>1){
          Train_STPGA <- GenAlgForSubsetSelectionMO(Pcs=PC99,Candidates,Test,ntoselect=nTrainToSelect,InitPop=GAParameters$InitPop,
          npopGA=GAParameters$npop, nelite=GAParameters$nelite, mutprob=GAParameters$mutprob, mutintensity = GAParameters$mutintensity,
          niterations=GAParameters$niterations,minitbefstop=GAParameters$minitbefstop, tabu=GAParameters$tabu,
          tabumemsize = GAParameters$tabumemsize,plotiters=GAParameters$plotiters,errorstat=GAParameters$errorstat,
 		 lambda=GAParameters$lambda, mc.cores=GAParameters$mc.cores)
-		 
-	   }
+		}
 	  
     })
 	

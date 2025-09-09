@@ -2401,6 +2401,7 @@ output$messageMergedGenoME <- renderText({
      processStatus5a()
    })
    
+   nCores <- reactive(input$nCores)
    
 ######
   
@@ -2416,7 +2417,7 @@ output$messageMergedGenoME <- renderText({
   
     if(checkMTData()==TRUE){
     # Start the process in a separate R process
-    callr::r_bg(function(getMTCVR, predictionData, Trait, nTraits, k, nIter, temp_file5b_path){
+    callr::r_bg(function(getMTCVR, predictionData, Trait, nTraits, k, nIter, temp_file5b_path,nCores){
       library(BGLR)
       library(rrBLUP)
       library(NAM)
@@ -2432,7 +2433,8 @@ output$messageMergedGenoME <- renderText({
       nTraits = nTraits(),
       k = k(),
       nIter = nIter(),
-      temp_file5b_path = temp_file5b()
+      temp_file5b_path = temp_file5b(),
+	  nCores <- nCores()
     ), stdout = temp_file5b(), stderr = temp_file5b())
     
     }else if(checkMTData()==FALSE){
@@ -2637,29 +2639,24 @@ output$messageMergedGenoME <- renderText({
     Mssg3GPOK()
   })
   
+  
  
 # Start the background process and return rProcess
  
  rProcess6 <- eventReactive(input$CrossValidationME,{
-   
-   
-   #browser()
-   
+  
     # Path for the temporary file
     temp_file6(tempfile())
-    
-    #ME_argList <- list(DT_1_Filt_List,genoDat_List,traits,KG,KE,CVMet,factVar,KMethod,FitEnvModels,fixedME,envVar,IDColsME,LocME,YrME)
-    
+      
     if(checkMEData()==TRUE){
     # Start the process in a separate R process ## fitMEModels_LOF_CV,fitMEModels_CV
-    callr::r_bg(function(getME_CV,DT_1_Filt_List,genoDat_List,traits,KG,KE,CVMet,factVar,k,niter,KMethod,FitEnvModels,fixedME,envVar,IDColsME,IDColME,LocME,YrME,temp_file6_path,FN) {
+    callr::r_bg(function(getME_CV,DT_1_Filt_List,genoDat_List,traits,KG,KE,CVMet,factVar,k,niter,KMethod,FitEnvModels,fixedME,envVar,IDColsME,IDColME,LocME,YrME,temp_file6_path,noCores) {
       library(BGLR)
       library(BGGE)
       library(EnvRtype)
-      library(foreach)
+	  library(foreach)
       library(doParallel)
-      registerDoParallel(5)
-      source(FN)
+    
       sink(temp_file6_path)
       result <- getME_CV(DT_1_Filt_List,genoDat_List,traits,KG,KE,CVMet,factVar,k,niter,KMethod,FitEnvModels,fixedME,envVar,IDColsME,IDColME,LocME,YrME)
       sink()
@@ -2684,14 +2681,11 @@ output$messageMergedGenoME <- renderText({
       LocME= LocationMECV(),
       YrME=YearMECV(),
       temp_file6_path = temp_file6(),
-      FN=FN
+      noCores = nCores()	  
     ), stdout = temp_file6(), stderr = temp_file6())
       
-      
       # result <- getME_CV(DT_Filt_List(),genoDat_List(),TraitME(),NULL,NULL,CVMet(),factVar(),kCV(),nIterCV(),"GK",fitEnvCovs(),fixMECV(),varEnvCV(),IDColsME(),IDColME(),LocationMECV(),YearMECV())
-      
-      
-    } else if(checkMEData()==FALSE){ 
+    }else if(checkMEData()==FALSE){ 
       
        sink(temp_file6())
        cat("Current data is not suitable for multi-environmental CV")
@@ -2828,24 +2822,36 @@ output$messageMergedGenoME <- renderText({
 ## & CV_run_Tab()==CV_out_Tab() & CV_run_Tab()==CV_out_Tab()
   
   
+  # cvrOutputListME <- reactive({
+    # if(!is.null(MECV_Out())){
+      # getOutTab_ME_CV(MECV_Out(),CVMet(),TraitME())
+    # }else{NULL}
+  # })
+  
   cvrOutputListME <- reactive({
     if(!is.null(MECV_Out())){
-      getOutTab_ME_CV(MECV_Out(),CVMet(),TraitME())
+	  fit <- MECV_Out()$results[[1]]
+	  DT <- MECV_Out()$DT[[1]]
+	  IDColsME <- MECV_Out()$IDColsME[[1]]
+	  summarize_ME_CV_fits(fit,DT,IDColsList=IDColsME)
     }else{NULL}
   })
   
-  
  
-dummyOut <- reactive({ 
+ dummyOut <- reactive({ 
    if(!is.null(cvrOutputListME())){
       b <- MECV_Out_List()
+	  d <- MECV_Out_List()
       cvmetVar <- CVMet()
       cvmetVarInd <- which(names(b) %in% cvmetVar)
-      b[[cvmetVarInd]] <-  cvrOutputListME()
+      b[[cvmetVarInd]] <-  cvrOutputListME()$metrics_summary
+	  d[[cvmetVarInd]] <- cvrOutputListME()$metrics_long
       MECV_Out_List(b) 
-      write.csv(as.data.frame(cvrOutputListME()),paste(outResults_Dir(),"/","ME_",cvmetVar,"_OutTable.csv",sep=""))
+	  
+      write.csv(as.data.frame(b[[cvmetVarInd]]),paste(outResults_Dir(),"/","ME_",cvmetVar,"_OutTable.csv",sep=""))
+	  write.csv(as.data.frame(d[[cvmetVarInd]]),paste(outResults_Dir(),"/","ME_",cvmetVar,"_OutTable_LongFmt.csv",sep=""))
    }
-})
+ })
  
 observe({
   MECV_Out_List()

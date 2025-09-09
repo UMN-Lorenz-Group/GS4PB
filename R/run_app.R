@@ -8,12 +8,11 @@
 #' @importFrom shiny shinyApp
 #' @importFrom golem with_golem_options
 
-run_app <- function(
-  
-  onStart = NULL,
-  options = list(),
-  enableBookmarking = NULL,
-  uiPattern = "/",
+run_app <- function(test_mode = FALSE,  
+           onStart = NULL,
+           options = list(),
+           enableBookmarking = NULL,
+           uiPattern = "/",
   ...
 ) {
 	tryCatch({
@@ -25,14 +24,28 @@ run_app <- function(
 	})
 
   with_golem_options(
+    # app = shinyApp(
+      # ui = app_ui,
+      # server = app_server,
+      # onStart = onStart,
+      # options = options,
+      # enableBookmarking = enableBookmarking,
+      # uiPattern = uiPattern
+     # ),
+
     app = shinyApp(
-      ui = app_ui,
-      server = app_server,
-      onStart = onStart,
+      ui = app_ui(),
+      server = function(input, output, session) {
+        if (test_mode) {
+          options(shiny.testmode = TRUE)  # Enable test mode
+        }
+        app_server(input, output, session)
+      },
+	  onStart = onStart,
       options = options,
       enableBookmarking = enableBookmarking,
       uiPattern = uiPattern
-    ),
-    golem_opts = list(...)
+	),
+   golem_opts = list(...)
   )
 }

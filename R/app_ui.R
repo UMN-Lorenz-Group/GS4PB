@@ -58,37 +58,47 @@ app_ui <- function(request){
       menuItem("Start GS Pipeline", tabName = "gs_pipeline", icon = icon("play-circle")),
       
       menuItem("Genotypic Data Processing",tabName="genotypic_data",icon = icon("database"),
-        menuSubItem("Load Genotypic Data",tabName="loadGeno",icon =icon("database")),
-        menuSubItem("Filter Genotypic Data",tabName="filterGeno",icon=icon("filter")),
-        menuSubItem("Impute Genotypic Data",tabName="imputeGeno",icon=icon("pen"))
+               menuSubItem("Load Genotypic Data",tabName="loadGeno",icon =icon("database")),
+               menuSubItem("Filter Genotypic Data",tabName="filterGeno",icon=icon("filter")),
+               menuSubItem("Impute Genotypic Data",tabName="imputeGeno",icon=icon("pen"))
       ),
-      menuItem("Phenotypic Data Processing", tabName = "phenotypic_data", icon = icon("chart-bar")),
-      menuItem("Merge Geno-Pheno Data", tabName = "geno_pheno_merge", icon = icon("project-diagram")),
-     
-      menuItem("Enviromics Data Processing", tabName = "enviromics", icon = icon("cloud"),
-         menuSubItem("Get Enviromics Data",tabName="EnvrData",icon=icon("cloud")),
-         menuSubItem("Get Environmental Relationship",tabName="EnvK",icon=icon("cloud"))
-      ),
-      
-      menuItem("Optimize Training Population", tabName = "optimize_training", icon = icon("users")),
-      
-      menuItem("Cross Validations", tabName = "cross_validations", icon = icon("check-circle"),
-        menuSubItem("Single Trait CV",tabName="STCV",icon=icon("check-circle")),
-        menuSubItem("Multi-trait CV",tabName="MTCV",icon=icon("check-circle")), 
-        menuSubItem("Multi-environment CV",tabName="MECV",icon=icon("check-circle"))
-      ),
-      
-      menuItem("Genomic Prediction", tabName = "genomic_prediction", icon = icon("chart-line"), 
-        menuSubItem("Single Trait GP",tabName="STGP",icon=icon("chart-line")),
-        menuSubItem("Multi-trait GP",tabName="MTGP",icon=icon("chart-line")), 
-        menuSubItem("Multi-environment GP",tabName="MEGP",icon=icon("chart-line"))
+          
+      menuItem("Single Env GP Workflow",tabName = "SE Workflow", icon =icon("project-diagram"),
+	           menuItem("Phenotypic Data Processing", tabName = "phenotypic_data_se", icon = icon("chart-bar")),
+               menuItem("Merge Geno-Pheno Data", tabName = "geno_pheno_merge_se", icon = icon("code-branch")),
+	  
+               menuItem("Optimize Training Population", tabName = "optimize_training", icon = icon("users")),
+               menuItem("Cross Validations", tabName = "cross_validations", icon = icon("check-circle"),
+                        menuSubItem("Single Trait CV",tabName="STCV",icon=icon("check-circle")),
+                        menuSubItem("Multi-trait CV",tabName="MTCV",icon=icon("check-circle"))
+               ),
+               menuItem("Genomic Prediction", tabName = "genomic_prediction", icon = icon("chart-line"), 
+                        menuSubItem("Single Trait GP",tabName="STGP",icon=icon("chart-line")),
+                        menuSubItem("Multi-trait GP",tabName="MTGP",icon=icon("chart-line"))
+               )
+      ),          
+          
+      menuItem("Multi-env GP Workflow",tabName = "ME Workflow", icon =icon("project-diagram"),   
+        menuItem("Phenotypic Data Processing", tabName = "phenotypic_data_me", icon = icon("chart-bar")),
+        menuItem("Merge Geno-Pheno Data", tabName = "geno_pheno_merge_me", icon = icon("code-branch")),	  
+       
+        menuItem("Enviromics Data Processing", tabName = "enviromics", icon = icon("cloud"),
+                 menuSubItem("Get Enviromics Data",tabName="EnvrData",icon=icon("cloud")),
+                 menuSubItem("Get Environmental Kinship",tabName="EnvK",icon=icon("cloud"))
+        ),
+        menuItem("Cross Validations", tabName = "cross_validations", icon = icon("check-circle"),
+                 menuSubItem("Single Trait ME CV",tabName="MECV",icon=icon("check-circle"))
+        ),
+        menuItem("Genomic Prediction", tabName = "genomic_prediction", icon = icon("chart-line"), 
+                 menuSubItem("Single Trait ME GP",tabName="MEGP",icon=icon("chart-line"))
+        )
       )
-    )
-  ),
+  )),
   
   dashboardBody(
     useShinyjs(),	
     custom_css,  # Include custom CSS
+	
     tabItems(
       tabItem(
         tabName = "home",
@@ -133,18 +143,19 @@ app_ui <- function(request){
                 tags$br(),
                 # Display selected directory path
                 verbatimTextOutput("dir_path")
-            )
-           ),
+            ),
+			box(width=12,title="Set number of cores for parallel computation",solidHeader=TRUE,status="primary",
+			  tags$br(),
+			  numericInput(inputId="nCores","Number of cores",value = 1,min =1,max=100)
+            )),
           column(8,
-         
-           box(width = 12, title = "GS Pipeline Instructions", solidHeader = TRUE, status = "primary",
+            box(width = 12, title = "GS Pipeline Instructions", solidHeader = TRUE, status = "primary",
             tags$h4("The GS pipeline involves steps ranging from genotypic and phenotypic data processing, merging geno and pheno data, optimizing training populations, 
                     cross-validation of genomic prediction models, and genomic prediction."),
             tags$img(src="www/GSPipelineInstructions.png", 
                      class = "img-fluid",  # Bootstrap class for responsive images
                      style = "max-width: 100%; height: auto;")
-                     
-           )
+            )
           )
         )
        ),

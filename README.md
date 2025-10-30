@@ -16,7 +16,7 @@
 
 2. **Pull the Docker Image**  
    ```bash
-   docker pull ivanvishnu/gs4pb:updated
+   docker pull umnlorenzgroup/gs4pb:updated
    ```
 
 3. **Run the Docker Container**  
@@ -24,12 +24,12 @@
    - **With Local Directory Binding**  
      Replace `source` with your target directory:
      ```bash
-     winpty docker run --mount type=bind,source=$HOME/Downloads/,target=/root/Results -it -p 3838:3838 ivanvishnu/gs4pb:updated
+     winpty docker run --mount type=bind,source=$HOME/Downloads/,target=/root/Results -it -p 3838:3838 umnlorenzgroup/gs4pb:updated
      ```
 
    - **Without Local Directory Binding**  
      ```bash
-     winpty docker run -it -p 3838:3838 ivanvishnu/gs4pb:updated
+     winpty docker run -it -p 3838:3838 umnlorenzgroup/gs4pb:updated
      ```
      After execution, copy the results to your local directory using:
      ```bash
@@ -39,7 +39,7 @@
    b) **On Other Systems**  
    Replace `source` with your target directory:
    ```bash
-   docker run --mount type=bind,source=$HOME/Downloads/,target=/root/Results -it -p 3838:3838 ivanvishnu/gs4pb:updated
+   docker run --mount type=bind,source=$HOME/Downloads/,target=/root/Results -it -p 3838:3838 umnlorenzgroup/gs4pb:updated
    ```
 
 4. **Access the Application**  

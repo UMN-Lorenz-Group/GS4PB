@@ -1,6 +1,6 @@
 ## Welcome to the GS4PB wiki!
 
-### The GS4PB (Previously SOYGEN2) App implements a genomic selection pipeline to integrate genotyping, phenotyping, and envirotyping data. The pipeline supports GS for single traits and multi-traits across single and multiple environments.
+### The GS4PB (Previously SOYGEN2) App implements a genomic selection pipeline to integrate genotyping, phenotyping, and envirotyping data. The pipeline supports GS for single traits and multi-traits across single and multiple environments ![(GS4PB Manuscript)](https://acsess.onlinelibrary.wiley.com/doi/10.1002/tpg2.70150). 
  
 
 ![GS4PB_Intro](https://github.com/user-attachments/assets/6fb38883-0348-4fbc-a70f-e2130a6b148c)

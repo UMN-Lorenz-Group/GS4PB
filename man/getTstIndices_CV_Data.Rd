@@ -2,24 +2,47 @@
 % Please edit documentation in R/ME_Functions.R
 \name{getTstIndices_CV_Data}
 \alias{getTstIndices_CV_Data}
-\title{Title of getTstIndices_CV_Data}
+\title{Obtain test/train data for the various cross validation schemes}
 \usage{
-getTstIndices_CV_Data(DT_2B, CVMet, nIter, k)
+getTstIndices_CV_Data(
+  DT_2B,
+  CVMet,
+  nIter = 5,
+  k = 5,
+  cvFactVar = NULL,
+  id_col = "gid",
+  env_col = "env",
+  y_col = "value",
+  base_seed = 125L,
+  cv00_partial_prop = 0.2
+)
 }
 \arguments{
-\item{DT_2B}{Description of DT_2B.}
+\item{DT_2B}{Data table which is input to fitMEModels .}
 
-\item{CVMet}{Description of CVMet.}
+\item{CVMet}{Character. Cross-validation scheme. Default = "CV1".
+Options: "CV1", "CV2", "CV0", "CV00","CV-LOFO".}
 
-\item{nIter}{Description of nIter.}
+\item{id_col}{Character. Variable specifying the colname with strain id with default value of "gid".}
 
-\item{k}{Description of k.}
+\item{env_col}{Character. Variable specifying the colname with environments with default value of "env"..}
+
+\item{y_col}{Character. Variable specifying the colname with trait value}
+
+\item{base_seed}{seed value for set.seed for sampling}
+
+\item{cv00_partial_prop}{proportion for masking in soft environments with default value set to 0.5.}
+
+\item{K}{Integer. Number of folds in k-fold cross-validation.}
+
+\item{NIter}{Integer. Number of replicates for cross-validation.}
 }
 \value{
-Description of what is returned.
+a list of list containing the data table, train and test indices for each of the fold for each of the reps. 
+In addition, the CV method and unique environments in the data are printed.
 }
 \description{
-Description of what getTstIndices_CV_Data does.
+A method to split input data to obtain test and training data for various cross validation schemes
 }
 \examples{
 \dontrun{

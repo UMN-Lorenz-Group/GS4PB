@@ -20,10 +20,14 @@
 #' @importFrom fs path_home
 #' @importFrom callr r_bg
 #' @importFrom DT DTOutput renderDT
+#' @importFrom future plan multisession
+#' @importFrom promises future_promise %...>%
 #' @noRd
 
 
 app_server <- function(input, output, session) {
+
+  future::plan(future::multisession, workers = 4)
 
   # Allow the user to select directories from the home directory or root
   #
@@ -51,69 +55,99 @@ app_server <- function(input, output, session) {
   output$dir_path <- renderText({
     selected_dir()
   })
-  
- 
- 
-  
-### GenoData  
-  
-  GenoTas <- reactive({
-    genoFile <- input$infileVCF
-    ext <- tools::file_ext(genoFile$datapath)
-    req(genoFile)
-    validate(need(ext == "vcf", "Please upload a vcf file"))
-    withProgress(message = 'Reading Data', value = 0, {
-      getTasObj(genoFile$datapath)})
-  })
-  
-  Geno <- eventReactive(input$infileVCF,{
-    withProgress(message = 'Converting VCF to Dataframe', value = 0, {
-      gt2d <- getGenoTas_to_DF(GenoTas())})
-    
-    gt2d
 
+  output$pipeline_welcome <- renderText({
+    wf <- if (!is.null(input$workflow_select) && input$workflow_select == "ME")
+            "Multi-Environment (ME)"
+          else if (!is.null(input$workflow_select) && input$workflow_select == "SE")
+            "Single Environment (SE)"
+          else
+            "Not selected"
+    paste0(
+      "Welcome to GS4PB  |  Active workflow: ", wf, "\n",
+      "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n",
+      " 1. Select Workflow (box above) \u2014 Single Environment (SE) or Multi-Environment (ME)\n",
+      " 2. Set output directory (box below) \u2014 results and logs saved there\n",
+      " 3. Proceed to Genotypic Data Processing \u2192 Load VCF\n\n",
+      "Pipeline stages:\n",
+      "  [Both]  Load VCF \u2192 Filter Markers & Samples \u2192 Impute\n\n",
+      "  [SE]    Phenotypic Data \u2192 Merge Geno+Pheno ->\n",
+      "          Optimize Training Pop \u2192 Cross-Validation \u2192 GEBV\n\n",
+      "  [ME]    Phenotypic Data \u2192 Merge Geno+Pheno ->\n",
+      "          Enviromics (optional) \u2192 ME Cross-Validation \u2192 ME GEBV\n"
+    )
   })
-  
-  
-  ## Tas to DF
-  #Geno_DF <- reavtiveVal(NULL)
-  Geno_DF <- reactive({
-    # browser()
-    if(!is.null(GenoTas())){getGenoTas_to_DF(GenoTas())}
-  })
- 
-  
-  temp_file0a <- reactiveVal('none')
-  
- # Start the process in a separate R process
-  
-  observe({
-    
-    temp_file0a(tempfile())
-    if(!is.null(Geno_DF())){
-      sink(temp_file0a())
-      cat(getGenoQCStats(Geno_DF()))
-      sink()
+
+
+### GenoData — async VCF loading via future_promise
+  # NOTE: TASSEL objects (rJava references) cannot cross R process boundaries.
+  # Only the serialisable data-frame and QC string are returned from the worker.
+  # GenoTas() creates the TASSEL object in the main-process JVM on demand.
+
+  genoFilePath <- reactiveVal(NULL)   # VCF path; set after load completes
+  genoDF_Data  <- reactiveVal(NULL)   # data-frame form of the genotype table
+  genoTasObj   <- reactiveVal(NULL)   # TASSEL object (Java ref, lives in main-process JVM)
+  genoLoadMsg  <- reactiveVal("Waiting for VCF upload...")
+
+  observeEvent(input$infileVCF, {
+    genoFile <- input$infileVCF
+    req(genoFile)
+    ext <- tools::file_ext(genoFile$datapath)
+    if (ext != "vcf") {
+      showNotification("Please upload a .vcf file", type = "error", duration = 5)
+      return()
     }
-    
+
+    # Reset downstream data so stale results are not carried forward
+    genoFilePath(NULL)
+    genoDF_Data(NULL)
+    genoTasObj(NULL)
+    genoLoadMsg("Loading VCF file …")
+    showNotification("Loading VCF file …",
+                     id = "vcf_loading", duration = NULL,
+                     type = "message", session = session)
+
+    fp <- genoFile$datapath
+
+    # Step 1 (sync, main process): read VCF once — TASSEL object stays in main JVM
+    tas  <- getTasObj(fp)
+    dfmt <- getGenoTas_to_DF(tas)
+    genoTasObj(tas)        # cache — GenoTas() uses this; no second VCF read needed
+    genoDF_Data(dfmt)
+    genoFilePath(fp)       # signal downstream reactives that geno data is ready
+    removeNotification("vcf_loading")
+    showNotification("VCF file loaded!", type = "message", duration = 3, session = session)
+    showNotification("Computing genotype QC stats …",
+                     id = "vcf_stats", duration = NULL,
+                     type = "message", session = session)
+
+    # Step 2 (async): QC stats are pure-R on the DF — offload to worker
+    future_promise({
+      getGenoQCStats(dfmt)
+    }) %...>% (function(qc) {
+      genoLoadMsg(qc)
+      removeNotification("vcf_stats")
+      showNotification("Genotype stats ready.", type = "message",
+                       duration = 3, session = session)
+    }) %...!% (function(e) {
+      genoLoadMsg(paste("Error computing QC stats:", e$message))
+      removeNotification("vcf_stats")
+      showNotification(e$message, type = "error", duration = NULL, session = session)
+    })
+    NULL
   })
-  
-  ### Test output 
-  # Periodically read the file and update the UI
-  mssgGenoStatsOut <- reactiveVal(NULL)
-  
-  output$messageGenoStats <- renderText({
-    
-    invalidateLater(1000, session) # Update every second
-    if(file.exists(temp_file0a())){
-      lines <- readLines(temp_file0a(), warn = FALSE)
-      mssgGenoStatsOut(paste(lines, collapse = "\n"))
-      return(paste(lines, collapse = "\n"))
-    
-    }else {
-      return("Waiting for output...")
-    }
+
+  # GenoTas: use the cached TASSEL object from the observer (no second VCF read).
+  GenoTas <- reactive({
+    req(genoTasObj())
+    genoTasObj()
   })
+
+  Geno_DF <- reactive({ genoDF_Data() })
+  Geno    <- reactive({ genoDF_Data() })   # backward-compat alias
+
+  mssgGenoStatsOut <- reactive({ genoLoadMsg() })
+  output$messageGenoStats <- renderText({ genoLoadMsg() })
   
   
   
@@ -873,9 +907,99 @@ output$messageGenoFilt1 <- renderText({
   
   
   
+### PC Analysis
+
+  pcGenoTable <- reactive({
+    switch(input$pcGenoSel,
+      "Raw"        = Geno_DF(),
+      "Filtered 1" = GenoFilt1_DF(),
+      "Filtered 2" = GenoFilt2_DF(),
+      "Imputed"    = GenoImp_DF()
+    )
+  })
+
+  pcaMeta <- reactive({
+    req(input$infilePCMeta)
+    fp  <- input$infilePCMeta$datapath
+    ext <- tolower(tools::file_ext(input$infilePCMeta$name))
+    if(ext == "csv"){
+      read.csv(fp, header=TRUE, stringsAsFactors=FALSE, check.names=FALSE)
+    } else {
+      read.table(fp, header=TRUE, sep="\t", stringsAsFactors=FALSE, check.names=FALSE)
+    }
+  })
+
+  output$pcMetaLoaded <- reactive({ !is.null(input$infilePCMeta) })
+  outputOptions(output, "pcMetaLoaded", suspendWhenHidden=FALSE)
+
+  observeEvent(input$infilePCMeta, {
+    cols <- colnames(pcaMeta())
+    updateSelectInput(session, "pcStrainCol", choices=cols, selected=cols[1])
+    updateSelectInput(session, "pcGroupCol",  choices=cols,
+                      selected=if(length(cols) >= 2) cols[2] else cols[1])
+  })
+
+  pcaResult <- reactiveVal(NULL)
+
+  observeEvent(input$RunPCA, {
+    req(pcGenoTable())
+    withProgress(message="Running PC Analysis...", value=0, {
+      pcaResult(getGenoPC(pcGenoTable(), input$nPCsComp))
+    })
+  })
+
+  pcaDF <- reactive({
+    req(pcaResult())
+    df <- pcaResult()$pcDF
+    if(!is.null(input$infilePCMeta) && !is.null(pcaMeta())){
+      meta      <- pcaMeta()
+      strainCol <- input$pcStrainCol
+      groupCol  <- input$pcGroupCol
+      meta[[strainCol]] <- gsub("\\.", "-", meta[[strainCol]])
+      merged <- merge(df, meta[, c(strainCol, groupCol), drop=FALSE],
+                      by.x="Strain", by.y=strainCol, all.x=FALSE)
+      merged <- merged[!duplicated(merged$Strain), ]
+      colnames(merged)[colnames(merged) == groupCol] <- "Group"
+      merged
+    } else {
+      df
+    }
+  })
+
+  output$pcaPlot <- renderPlot({
+    req(pcaDF())
+    df     <- pcaDF()
+    hasGrp <- "Group" %in% colnames(df)
+    p <- ggplot(df, aes(x=PC1, y=PC2))
+    if(hasGrp){
+      p <- p +
+        geom_point(aes(fill=Group), alpha=0.6, size=9, shape=21) +
+        scale_fill_viridis_d(option="D") +
+        guides(fill=guide_legend(override.aes=list(size=8)))
+    } else {
+      p <- p + geom_point(alpha=0.6, size=9, shape=21, fill="steelblue")
+    }
+    p +
+      labs(x="PC 1", y="PC 2") +
+      theme_bw() +
+      theme(
+        legend.position = "bottom",
+        axis.title      = element_text(size=18, face="bold"),
+        legend.title    = element_text(size=18, face="bold"),
+        plot.background = element_rect(fill="white")
+      )
+  }, bg="white")
+
+  output$pcaTable <- renderDT({
+    req(pcaDF())
+    datatable(pcaDF(), options=list(scrollX=TRUE, pageLength=15), rownames=FALSE)
+  })
+
+###
+
 ### Merge and Process Data
-  
-  setTasImpGeno <- reactive(input$setGenoImpTas) 
+
+  setTasImpGeno <- reactive(input$setGenoImpTas)
   
 ### Check for which genotype matrix to set   
   
@@ -1059,7 +1183,10 @@ output$messageGenoFilt1 <- renderText({
   })
   
   StrainME <- reactive(input$strainME)
-  
+  EnvVarME <- reactive(input$envME)
+  LocMEColVar <- reactive(input$locMECol)
+  YrMEColVar <- reactive(input$yrMECol)
+
   TraitCols <- reactive(input$traitCols)
 
   observeEvent(input$traitCols, {
@@ -1191,16 +1318,34 @@ output$messageGenoFilt1 <- renderText({
      colnames(PhenoME())[which(!as.character(colnames(PhenoME())) %in% as.character(TraitCols()))]
   })
 
-##### 
-#####  
- 
-  
+  stdVarPhData <- reactive({
+    if(!is.null(PhenoME()) & !is.null(IDColsME()) & !is.null(EnvVarME()) & !is.null(StrainME())){
+      stdizePhVarNames(PhenoME(),IDColsME(),StrainME(),EnvVarME(),LocMEColVar(),YrMEColVar())
+    }else{NULL}
+  })
+
+  IDColsModME <- reactive({
+    if(!is.null(stdVarPhData())) stdVarPhData()[[2]]
+  })
+
+  PhenoMEMod <- reactive({
+    if(!is.null(stdVarPhData())) stdVarPhData()[[1]]
+  })
+
+  EnvVarMEMod <- reactive({
+    if(!is.null(stdVarPhData())) stdVarPhData()[[3]]
+  })
+
+#####
+#####
+
+
   phenoMEData <- reactive({
     print("phME In")
     #browser()
     if(!is.null(TraitME())){
-      getPhenoMEData(PhenoME(),TraitME(),nSelTraitsME(),IDColsME(),StrainME())
-    }else if(is.null(TraitME())){ 
+      getPhenoMEData(PhenoMEMod(),TraitME(),nSelTraitsME(),IDColsModME(),StrainME())
+    }else if(is.null(TraitME())){
       checkPhDataME("Select trait and merge data")
     }
   })
@@ -2404,37 +2549,54 @@ output$messageMergedGenoME <- renderText({
    nCores <- reactive(input$nCores)
    
 ######
-  
+
+  kMT <- reactive(input$kMT)
+  nIterMT <- reactive(input$nIterMT)
+  mtCVMet <- reactive(input$mtCVMet)
+  b_Iter_MTCV   <- reactive(input$b_Iter_MTCV)
+  b_Burnin_MTCV <- reactive(input$b_Burnin_MTCV)
+  b_Thin_MTCV   <- reactive(input$b_Thin_MTCV)
+  b_R2_MTCV     <- reactive(input$b_R2_MTCV)
+  b_Digits_MTCV <- reactive(input$b_Digits_MTCV)
+
   temp_file5b <- reactiveVal('none')
   processComplete5b <- reactiveVal(FALSE)
   cvrOutputListMT <- reactiveVal(NULL)
-  
+
   # Start the background process and return rProcess
   rProcess5b <- eventReactive(input$CrossValidationMT, {
-    
+
     # Path for the temporary file
     temp_file5b(tempfile())
-  
+
     if(checkMTData()==TRUE){
     # Start the process in a separate R process
-    callr::r_bg(function(getMTCVR, predictionData, Trait, nTraits, k, nIter, temp_file5b_path,nCores){
+    callr::r_bg(function(getMTCVR, predictionData, Trait, nTraits, k, nIter, mtCVMet, b_Iter, b_Burnin, b_Thin, b_R2, b_Digits, A_ext, temp_file5b_path){
       library(BGLR)
       library(rrBLUP)
       library(NAM)
-     
+      library(doParallel)
+      library(foreach)
+
       sink(temp_file5b_path)
-      result <- getMTCVR(predictionData, Trait, nTraits, k, nIter)
+      result <- getMTCVR(predictionData, Trait, nTraits, k, nIter, mtCVMet, b_iter=b_Iter, b_burnin=b_Burnin, b_thin=b_Thin, b_R2=b_R2, b_digits=b_Digits, A_ext=A_ext)
       sink()
       result
     }, args = list(
       getMTCVR = getMTCVR,
       predictionData = predictionData(),
       Trait = unlist(Trait()),
-      nTraits = nTraits(),
-      k = k(),
-      nIter = nIter(),
-      temp_file5b_path = temp_file5b(),
-	  nCores <- nCores()
+      nTraits = nSelTraits(),
+      k = kMT(),
+      nIter = nIterMT(),
+      mtCVMet = mtCVMet(),
+      b_Iter   = b_Iter_MTCV(),
+      b_Burnin = b_Burnin_MTCV(),
+      b_Thin   = b_Thin_MTCV(),
+      b_R2     = b_R2_MTCV(),
+      b_Digits = b_Digits_MTCV(),
+      A_ext    = if (input$mtCVKinSource == "gmat") mt_kin_matrix() else NULL,
+      temp_file5b_path = temp_file5b()
     ), stdout = temp_file5b(), stderr = temp_file5b())
     
     }else if(checkMTData()==FALSE){
@@ -2676,15 +2838,15 @@ output$messageMergedGenoME <- renderText({
       FitEnvModels= fitEnvCovs(),
       fixedME= fixMECV(),
       envVar= varEnvCV(),
-      IDColsME= IDColsME(),
+      IDColsME= IDColsModME(),
       IDColME= IDColME(),
       LocME= LocationMECV(),
       YrME=YearMECV(),
       temp_file6_path = temp_file6(),
-      noCores = nCores()	  
+      noCores = nCores()
     ), stdout = temp_file6(), stderr = temp_file6())
-      
-      # result <- getME_CV(DT_Filt_List(),genoDat_List(),TraitME(),NULL,NULL,CVMet(),factVar(),kCV(),nIterCV(),"GK",fitEnvCovs(),fixMECV(),varEnvCV(),IDColsME(),IDColME(),LocationMECV(),YearMECV())
+
+      # result <- getME_CV(DT_Filt_List(),genoDat_List(),TraitME(),NULL,NULL,CVMet(),factVar(),kCV(),nIterCV(),"GK",fitEnvCovs(),fixMECV(),varEnvCV(),IDColsModME(),IDColME(),LocationMECV(),YearMECV())
     }else if(checkMEData()==FALSE){ 
       
        sink(temp_file6())
@@ -2833,7 +2995,7 @@ output$messageMergedGenoME <- renderText({
 	  fit <- MECV_Out()$results[[1]]
 	  DT <- MECV_Out()$DT[[1]]
 	  IDColsME <- MECV_Out()$IDColsME[[1]]
-	  summarize_ME_CV_fits(fit,DT,IDColsList=IDColsME)
+	  summarize_ME_CV_fits(fit)
     }else{NULL}
   })
   
@@ -3128,6 +3290,23 @@ output$emCVRME <- renderTable({
   # })
   
   
+  TSName <- reactive({
+    if(TS() == "Complete Input Genotype Set"){
+      tsName <- "CompleteTS"
+    }else if(TS() == "Optimal Train Set from Step 3"){
+      tsName <- "STPGA_TS"
+    }else if(TS() == "Random Train Set from Step 3"){
+      tsName <- "Random_TS"
+    }
+    tsName
+  })
+
+  b_Iter_MTGP   <- reactive(input$b_Iter_MTGP)
+  b_Burnin_MTGP <- reactive(input$b_Burnin_MTGP)
+  b_Thin_MTGP   <- reactive(input$b_Thin_MTGP)
+  b_R2_MTGP     <- reactive(input$b_R2_MTGP)
+  b_Digits_MTGP <- reactive(input$b_Digits_MTGP)
+
   temp_file7b <- reactiveVal('none')
   processComplete7b <- reactiveVal(FALSE)
   gpOutputListMT <- reactiveVal(NULL)
@@ -3143,35 +3322,41 @@ output$emCVRME <- renderTable({
     if(checkMTData()==TRUE){
       
       # Start the process in a separate R process
-      callr::r_bg(function(getRankedPredictedValuesMT, predictionData, nTraits, Trait, GPModelMT,optTS,temp_file7b_path,nSelTraits,cleanREPV2){
-        
+      callr::r_bg(function(getRankedPredictedValuesMT, predictionData, nTraits, Trait, GPModelMT, optTS, temp_file7b_path, nSelTraits, cleanREPV2, b_Iter, b_Burnin, b_Thin, b_R2, b_Digits, A_ext){
+
         library(BGLR)
         library(rrBLUP)
         library(NAM)
         library(sommer)
         sink(temp_file7b_path)
-        
+
        #a <-  getRankedPredictedValuesMT(predictionData(),nTraits(),unlist(Trait()),GPModelMT(),optTS())
-        
+
         if(nSelTraits>1){
-          cat(paste("Running computations for multi-trait genomic prediction of ",paste(unlist(Trait),collapse=", "),"\n",sep=""))    
-          outputDFList <- getRankedPredictedValuesMT(predictionData,nTraits,unlist(Trait),GPModelMT,optTS)
+          cat(paste("Running computations for multi-trait genomic prediction of ",paste(unlist(Trait),collapse=", "),"\n",sep=""))
+          outputDFList <- getRankedPredictedValuesMT(predictionData, nTraits, unlist(Trait), GPModelMT, optTS, b_iter=b_Iter, b_burnin=b_Burnin, b_thin=b_Thin, b_R2=b_R2, b_digits=b_Digits, A_ext=A_ext)
           cat("\n")
           return(outputDFList)
         }
-     
+
         sink()
-        
+
       }, args = list(
         getRankedPredictedValuesMT = getRankedPredictedValuesMT,
         predictionData = predictionData(),
         nTraits = nTraits(),
         Trait = unlist(Trait()),
-        GPModelMT=GPModelMT(),
-        optTS=optTS(),
+        GPModelMT = GPModelMT(),
+        optTS = optTS(),
         temp_file7b_path = temp_file7b(),
-        nSelTraits=nSelTraits(),
-        cleanREPV2=cleanREPV2
+        nSelTraits = nSelTraits(),
+        cleanREPV2 = cleanREPV2,
+        b_Iter   = b_Iter_MTGP(),
+        b_Burnin = b_Burnin_MTGP(),
+        b_Thin   = b_Thin_MTGP(),
+        b_R2     = b_R2_MTGP(),
+        b_Digits = b_Digits_MTGP(),
+        A_ext    = if (input$mtGPKinSource == "gmat") mt_kin_matrix() else NULL
       ), stdout = temp_file7b(), stderr = temp_file7b())
       
     }else if(checkSTData()==FALSE){
@@ -3261,83 +3446,210 @@ output$emCVRME <- renderTable({
   varEnv <- reactive(input$EnvVarID)
   GPModelME <- reactive(input$MEModelEnvR)
   
-  GenK <- reactiveVal(NULL) 
-  
-  KGMethod <- reactive({
-    if(input$GKernelMet =="Linear"){"GB"}else if(input$GKernelMet =="Gaussian"){"GK"}
+  ### ME GP-specific observers and reactives
+
+  observeEvent(input$infileBLUEsME, {
+    if (tools::file_ext(input$infileBLUEsME$datapath) != "csv") return()
+    updateSelectInput(inputId ="YearMEGP",choices = c("All",YearsME()),selected="All")
   })
-  
-  fitEnvCovs <- reactive(input$fitEnvCov)
-  
-   
-####   
-  
+
+  observeEvent(input$infileBLUEsME, {
+    if (tools::file_ext(input$infileBLUEsME$datapath) != "csv") return()
+    updateSelectInput(inputId ="LocationMEGP",choices = c("All",LocationsME()),selected="All")
+  })
+
+  YearMEGP <- reactive(input$YearMEGP)
+  LocationMEGP <- reactive(input$LocationMEGP)
+
+  observe({
+    req(EnvVarME())
+	req(IDColsME())
+	updateSelectInput(inputId ="fixed_MEGP",choices = IDColsME(),selected=EnvVarME())
+  })
+
+ observe({
+    req(EnvVarME())
+	req(IDColsME())
+    updateSelectInput(inputId ="EnvVarID_MEGP",choices = IDColsME(),selected=EnvVarME())
+ })
+
+  observe({
+    req(EnvVarME())
+	req(IDColsME())
+    updateSelectInput(inputId ="mskFactrVar",choices = IDColsME(),selected=EnvVarME())
+  })
+
+  mskFactorVar <- reactive(input$mskFactrVar)
+
+  mskFctrCol <- reactive({
+	  if(!is.null(PhenoME())){
+	   which(colnames(PhenoME()) %in% mskFactorVar())
+	  }
+  })
+
+  mskFactorLevsME <- reactive({
+    if(length(mskFctrCol()) > 0){
+     levels(factor(PhenoME()[,mskFctrCol()]))
+    }
+  })
+
+  observeEvent(input$mskFactrVar,{
+   updateSelectInput(inputId ="mskFactrLev",choices = mskFactorLevsME())
+  })
+
+  mskFactorLevelME <- reactive(input$mskFactrLev)
+  mskFactorProp <- reactive(input$mskProp)
+  mskNsampleReps <- reactive(input$nMskSampReps)
+
+### ME GP Params
+
+ ## Model params for MEGP
+ fitEnvCovs_MEGP <- reactive(input$fitEnvCov_MEGP)
+ reaction_MEGP <- reactive(input$reaction_MEGP)
+
+ ## Kernel params for MEGP
+
+ dim_KE_MEGP <- reactive(input$dimn_KE_MEGP)
+ bandWdth_MEGP <- reactive(input$bandWidth_MEGP)
+ prQntile_MEGP <- reactive(input$quantile_MEGP)
+
+ ## MCMC params for MEGP
+
+ b_Iter_MEGP <- reactive(input$b_Iter_MEGP)
+ b_Burnin_MEGP <- reactive(input$b_Burnin_MEGP)
+ b_Thin_MEGP <- reactive(input$b_Thin_MEGP)
+ b_Tol_MEGP <- reactive(input$b_Tol_MEGP)
+ b_R2_MEGP <- reactive(input$b_R2_MEGP)
+ b_Digits_MEGP <- reactive(input$b_Digits_MEGP)
+
+ ## Covariates for MEGP
+ fix_MEGP <- reactive({
+   v <- input$fixed_MEGP
+   if (!is.null(v) && nchar(v) > 0) v else EnvVarME()
+ })
+ varEnv_MEGP <- reactive({
+   v <- input$EnvVarID_MEGP
+   if (!is.null(v) && nchar(v) > 0) v else EnvVarME()
+ })
+
+ ##
+
+ GPModel_MEGP <- reactive(input$MEModelEnvR)
+ GenK_GP <- reactiveVal(NULL)
+
+ KGMethod_MEGP <- reactive({
+    if(input$GKernelMet_MEGP =="Linear"){"GB"}else if(input$GKernelMet_MEGP =="Gaussian"){"GK"}
+ })
+
+ ###
+
+  stdGPNames <- reactive({
+	  if(!is.null(IDColsME()) & !is.null(StrainME()) & !is.null(EnvVarME()) & !is.null(varEnv_MEGP()) & !is.null(fix_MEGP())){
+	
+		   stdizeGPCovarNames(IDColsME(),StrainME(),EnvVarME(),varEnv_MEGP(),fix_MEGP(),mskFactorVar())
+	  }
+  })
+
+   varEnv_MEGP_Mod <- reactive({
+    if(!is.null(stdGPNames())){
+      stdGPNames()[[1]]
+	}
+   })
+
+   fixMEGP_Mod <- reactive({
+     if(!is.null(stdGPNames())){
+         stdGPNames()[[2]]
+	  }
+	})
+
+   mskFactorVar_Mod <- reactive({
+     if(!is.null(stdGPNames())){
+         stdGPNames()[[3]]
+	  }
+	})
+
+####
+
   temp_file7c <- reactiveVal('none')
   processComplete7c <- reactiveVal(FALSE)
   gpOutputListSTME <- reactiveVal(NULL)
- 
-  
+
+
   # Start the background process and return rProcess
-  
+
   rProcess7c <- eventReactive(input$RunPredictionsME,{
-    
+
     #browser()
+
     # Path for the temporary file
     temp_file7c(tempfile())
-    
+
     if(checkMEData()==TRUE){
-      
+
       # Start the process in a separate R process
-      callr::r_bg(function(getMEPred,DT_Filt_List,genoDat_List,TraitME,KG,EnvK,KGMethod,fitEnvCovs,fixME,varEnv,IDColsME,LocationME,YearME,temp_file7c_path,fitMEModels_Predictions){
-        
+      callr::r_bg(function(fitMEModels_LOFO_Pred,get_kinship_kernels,fit_kernel_models,DT_Filt_List,genoDat_List,TraitME,KG,EnvK,factrVar, maskFactrLev,maskProp,nSampleReps,fixME,KGMethod,fitEnvCovs,reaction,varEnv,IDColsME,IDColME,LocationME,YearME,dimension_KE,bandwidth,quantil,b_Iter,b_Burnin,b_Thin,b_Tol,b_r2,b_Digits,FN,temp_file7c_path){
+        Sys.setenv(RENV_ACTIVATE_PROJECT = "FALSE")  # prevent renv OOM in PSOCK cluster workers
         library(BGGE)
         library(EnvRtype)
-        #library(bWGR)
         library(NAM)
         library(sommer)
-        #source("GS_Pipeline_Jan_2022_FnsApp.R")
+        source(FN)
         sink(temp_file7c_path)
-        
-         cat(paste("Running computations for multi-environment genomic prediction of ",paste(unlist(TraitME),collapse=", "),"\n",sep=""))    
-        
-          if(fitEnvCovs == FALSE){
-            outputDFList <- getMEPred(DT_Filt_List,genoDat_List,TraitME,KG=NULL,KE=NULL,KMethod= KGMethod,FitEnvModels = fitEnvCovs,fixedME=fixME,envVar=varEnv,IDColsME =IDColsME,LocME=LocationME,YrME=YearME)
-          }else{ 
-            outputDFList <- getMEPred(DT_Filt_List,genoDat_List,TraitME,KG=NULL,KE=EnvK,KMethod= KGMethod,FitEnvModels = fitEnvCovs,fixedME=fixME,envVar=varEnv,IDColsME =IDColsME,LocME=LocationME,YrME=YearME)
-          }
-         cat("\n")
-         return(outputDFList)
+
+        cat(paste("Running computations for multi-environment genomic prediction of ",paste(unlist(TraitME),collapse=", "),"\n",sep=""))
+
+        outputDFList <- fitMEModels_LOFO_Pred(DT_Filt_List,genoDat_List,TraitME,KG=KG,KE=EnvK,factrVar, maskFactrLev,maskProp,nSampleReps,fixedME=fixME,envVar=varEnv,IDColsME,IDColME,LocME=LocationME,YrME=YearME,KMethod= KGMethod,FitEnvModels = fitEnvCovs,Reaction= reaction,dimension_KE,bandwidth,quantil,b_iter=b_Iter,b_burnin=b_Burnin,b_thin=b_Thin,b_tol=b_Tol,b_R2=b_r2,b_digits=b_Digits)
+
+        cat("\n")
+        return(outputDFList)
         sink()
-        
+
       }, args = list(
-        getMEPred = getMEPred,
+        fitMEModels_LOFO_Pred = fitMEModels_LOFO_Pred,
+        get_kinship_kernels=get_kinship_kernels,
+        fit_kernel_models=fit_kernel_models,
         DT_Filt_List = DT_Filt_List(),
         genoDat_List = genoDat_List(),
         TraitME = unlist(TraitME()),
-        KG=GenK(),
+        KG=GenK_GP(),
         EnvK=EnvK(),
-        KGMethod=KGMethod(),
-        fitEnvCovs= fitEnvCovs(),
-        fixME =fixME(),
-        varEnv=varEnv(),
-        IDColsME=IDColsME(),
-        LocationME=LocationME(),
-        YearME= YearME(),
-        temp_file7c_path = temp_file7c(),
-        fitMEModels_Predictions=fitMEModels_Predictions
-      ), stdout = temp_file7c(), stderr = temp_file7c())
-      
+		factrVar = mskFactorVar_Mod(),
+		maskFactrLev = mskFactorLevelME(),
+		maskProp= mskFactorProp(),
+		nSampleReps= mskNsampleReps(),
+        KGMethod=KGMethod_MEGP(),
+	    fitEnvCovs= fitEnvCovs_MEGP(),
+		reaction= reaction_MEGP(),
+        fixME = fixMEGP_Mod(),
+        varEnv= varEnv_MEGP_Mod(),
+        IDColsME= IDColsModME(),
+		IDColME = IDColME(),
+        LocationME= LocationMEGP(),
+        YearME= YearMEGP(),
+		dimension_KE = dim_KE_MEGP(),
+	    bandwidth = bandWdth_MEGP(),
+	    quantil = prQntile_MEGP(),
+		b_Iter= b_Iter_MEGP(),
+        b_Burnin= b_Burnin_MEGP(),
+        b_Thin = b_Thin_MEGP(),
+        b_Tol= b_Tol_MEGP(),
+        b_r2 = b_R2_MEGP(),
+        b_Digits=b_Digits_MEGP(),
+		FN=FN,
+        temp_file7c_path = temp_file7c()
+        ), stdout = temp_file7c(), stderr = temp_file7c())
+
    }else if(checkMEData()==FALSE){
-      
-      sink(temp_file7c())      
+
+      sink(temp_file7c())
       cat("Current data is not suitable for multi-environment genomic prediction.\n")
       sink()
-      
+
     }
-    
+
   })
-  
-  
+
+
   STMEGPMssg <- reactiveVal(NULL)
   # Reactive expression to check process status and read temp file
   processStatus7c <- reactive({
@@ -3374,7 +3686,7 @@ output$emCVRME <- renderTable({
   outputListMETab <- reactive({
     #browser()
     if(!is.null(gpOutputListSTME())){
-     getCombinedTab(gpOutputListSTME(),TraitME(),IDColsME(),IDColME(),fitEnvCovs())
+     getCombinedTab(gpOutputListSTME(),TraitME(),IDColsME(),IDColME(),varEnv_MEGP(),fitEnvCovs_MEGP(),reaction_MEGP())
     }
   })
 
@@ -3437,14 +3749,14 @@ output$emCVRME <- renderTable({
  ## Render Table for ME
  # "Homogeneous Variance (G+E+GxE)","Heterogeneous Variance (G+E+GxEi)")
   
-  output$Ranked_Lines_for_SelectionSTME <- renderTable({ 
-    if(GPModelME()=="Main Effect (G+E)" || GPModelME()=="Main Effect (G+E+W)" ){
-        (gpOutputListSTME()[[1]][[3]][[1]][1:15,])
-    }else if(GPModelME()=="Homogeneous Variance (G+E+GxE)" || GPModelME()=="Homogeneous Variance (G+E+GxE+W)"){
-        (gpOutputListSTME()[[1]][[3]][[2]][1:15,])
-      
-    }else if(GPModelME()=="Heterogeneous Variance (G+E+GxEi)" || GPModelME()== "Heterogeneous Variance (G+E+GxEi+W)"){
-        (gpOutputListSTME()[[1]][[3]][[3]][1:15,])
+  output$Ranked_Lines_for_SelectionSTME <- renderTable({
+    if(GPModel_MEGP()=="Main Effect (G+E)" || GPModel_MEGP()=="Main Effect (G+E+W)" ){
+        (gpOutputListSTME()$preds[[1]][[1]][1:15,])
+    }else if(GPModel_MEGP()=="Homogeneous Variance (G+E+GxE)" || GPModel_MEGP()=="Homogeneous Variance (G+E+GxE+W)"){
+        (gpOutputListSTME()$preds[[1]][[2]][1:15,])
+
+    }else if(GPModel_MEGP()=="Heterogeneous Variance (G+E+GxEi)" || GPModel_MEGP()== "Heterogeneous Variance (G+E+GxEi+W)"){
+        (gpOutputListSTME()$preds[[1]][[3]][1:15,])
     }
   })
 
@@ -3487,23 +3799,23 @@ output$emCVRME <- renderTable({
 
         # Customize layout
         p <- p %>%
-          layout(
+          plotly::layout(
                   #title = paste("Upper Bound of Reliability vs Predicted Values for", Trait()),
             title = list(
-              text = paste("Upper Bound of Reliability vs Predicted Values for", Trait()), 
+              text = paste("Upper Bound of Reliability vs Predicted Values for", Trait()),
               y = 0.95,  # Adjust the vertical placement of the title (closer to top = 1)
               x = 0.5,  # Center the title horizontally
               xanchor = 'center',
               yanchor = 'top'
             ),
-            margin = list(t = 100), 
+            margin = list(t = 100),
             xaxis = list(title = "Predicted Value"),
             yaxis = list(title = "Upper Bound of Reliability"),
             font = list(size = 16))
 
        # Return the plotly object
         
-        outFile_path <- paste(outResults_Dir(),"/","SingleTrait_GP_Plot_for_",Trait(),".html",sep="")
+        outFile_path <- paste(outResults_Dir(),"/","SingleTrait_GP_Plot_for_",Trait(),"_",TSName(),".html",sep="")
         
         # Save the plot as an HTML file
         saveWidget(p, file = outFile_path)
@@ -3568,15 +3880,15 @@ output$emCVRME <- renderTable({
                    hoverinfo = 'text')
       
       # Customize layout
-        p <- p %>% 
-             layout(
+        p <- p %>%
+             plotly::layout(
                title = paste("Upper Bound of Reliability vs Predicted Values for ", unlist(Trait())[loc_i],sep=""),
                margin = list(t = 100),
                xaxis = list(title = "Predicted Value"),
                yaxis = list(title = "Upper Bound of Reliability"),
                font = list(size = 14))
     
-      outFile_path <- paste(outResults_Dir(),"/","SingleTrait_GP_Plot_for_",unlist(Trait())[loc_i],".html",sep="")
+      outFile_path <- paste(outResults_Dir(),"/","SingleTrait_GP_Plot_for_",unlist(Trait())[loc_i],"_",TSName(),".html",sep="")
       
       # Save the plot as an HTML file
       saveWidget(p, file = outFile_path)
@@ -3650,8 +3962,8 @@ output$emCVRME <- renderTable({
                      hoverinfo = 'text')
         
         # Customize layout
-        p <- p %>% 
-          layout(
+        p <- p %>%
+          plotly::layout(
             title = paste("Upper Bound of Reliability vs Predicted Values for ", unlist(Trait())[loc_i],sep=""),
             margin = list(t = 100),
             xaxis = list(title = "Predicted Value"),
@@ -3678,12 +3990,205 @@ output$emCVRME <- renderTable({
   
 ######## Table Export Handlers
   
+  output$ExportPCScores <- downloadHandler(
+    filename = function() paste0("PC_Scores_", Sys.Date(), ".csv"),
+    content  = function(file) write.csv(pcaDF(), file, row.names=FALSE)
+  )
+
+  ### ── Genomic Kinship Server ────────────────────────────────────────────────
+
+  # ReactiveVals
+  kinQCResult    <- reactiveVal(NULL)
+  kinGmatResult  <- reactiveVal(NULL)
+  kinDiagResult  <- reactiveVal(NULL)
+  kinDedupResult <- reactiveVal(NULL)
+  kinTuneResult  <- reactiveVal(NULL)
+  kinPCAResult   <- reactiveVal(NULL)
+
+  # Source reactive — same genotype tables as PC Analysis
+  kinGenoTable <- reactive({
+    switch(input$kinGenoSel,
+      "Raw"        = Geno_DF(),
+      "Filtered 1" = GenoFilt1_DF(),
+      "Filtered 2" = GenoFilt2_DF(),
+      "Imputed"    = GenoImp_DF()
+    )
+  })
+
+  # Step 1: QC Filtering
+  observeEvent(input$RunKinQC, {
+    req(kinGenoTable())
+    withProgress(message = "Running QC Filtering...", value = 0, {
+      kinQCResult(getQCFilteredM(
+        kinGenoTable(),
+        maf              = input$kinMAF,
+        marker.callrate  = input$kinMarkerCR,
+        ind.callrate     = input$kinIndCR,
+        heterozygosity   = input$kinHetero,
+        Fis              = input$kinFis,
+        impute           = input$kinImpute
+      ))
+    })
+  })
+
+  output$kinQCMsg    <- renderText({ req(kinQCResult()); kinQCResult()$msg })
+  output$kinQCHeteroz <- renderPlot({ req(kinQCResult()); print(kinQCResult()$plot.heteroz) },   bg="white")
+  output$kinQCMaf     <- renderPlot({ req(kinQCResult()); print(kinQCResult()$plot.maf) },        bg="white")
+  output$kinQCMissInd <- renderPlot({ req(kinQCResult()); print(kinQCResult()$plot.missing.ind) }, bg="white")
+  output$kinQCMissSNP <- renderPlot({ req(kinQCResult()); print(kinQCResult()$plot.missing.SNP) }, bg="white")
+  output$kinQCFis     <- renderPlot({ req(kinQCResult()); print(kinQCResult()$plot.Fis) },        bg="white")
+
+  output$DownloadMclean <- downloadHandler(
+    filename = function() paste0("Mclean_", Sys.Date(), ".txt"),
+    content  = function(file) write.table(kinQCResult()$M.clean, file)
+  )
+
+  # Step 2: G Matrix Estimation
+  observeEvent(input$RunGmat, {
+    req(kinQCResult())
+    kinDedupResult(NULL)   # reset dedup when G is re-estimated
+    withProgress(message = "Estimating G Matrix...", value = 0, {
+      kinGmatResult(getGmat(kinQCResult()$M.clean, method = input$kinGmethod))
+    })
+  })
+
+  output$kinGmatMsg <- renderText({ req(kinGmatResult()); kinGmatResult()$msg })
+
+  # Resolve which G matrix to pass to SE:MT CV/GP (NULL = use A.mat inside function)
+  # Priority: tuned G > deduplicated G > raw G > NULL
+  mt_kin_matrix <- reactive({
+    if (!is.null(kinTuneResult()))  kinTuneResult()$Gb
+    else if (!is.null(kinDedupResult())) kinDedupResult()$G_clean
+    else if (!is.null(kinGmatResult())) kinGmatResult()$G
+    else NULL
+  })
+
+  output$DownloadGmat <- downloadHandler(
+    filename = function() paste0("Gmat_", Sys.Date(), ".csv"),
+    content  = function(file) write.csv(kinGmatResult()$G, file)
+  )
+
+  # Step 3a: Kinship Diagnostics
+  observeEvent(input$RunKinDiag, {
+    req(kinGmatResult())
+    kinDedupResult(NULL)   # reset dedup when diagnostics are re-run
+    withProgress(message = "Running Kinship Diagnostics...", value = 0, {
+      kinDiagResult(getKinshipDiag(kinGmatResult()$G, duplicate.thr = input$kinDupThr))
+    })
+  })
+
+  output$kinDiagMsg     <- renderText({ req(kinDiagResult()); kinDiagResult()$msg })
+  output$kinDiagPlot    <- renderPlot({ req(kinDiagResult()); print(kinDiagResult()$plot.diag) },    bg="white")
+  output$kinOffdiagPlot <- renderPlot({ req(kinDiagResult()); print(kinDiagResult()$plot.offdiag) }, bg="white")
+
+  # Duplicate pairs table — shown only when duplicates exist
+  output$kinHasDuplicates <- reactive({
+    d <- kinDiagResult()
+    !is.null(d) && !is.null(d$list.duplicate) && nrow(d$list.duplicate) > 0
+  })
+  outputOptions(output, "kinHasDuplicates", suspendWhenHidden = FALSE)
+
+  output$kinDupTable <- renderTable({
+    req(kinDiagResult())
+    dup <- kinDiagResult()$list.duplicate
+    req(!is.null(dup) && nrow(dup) > 0)
+    dup
+  }, striped = TRUE, hover = TRUE, bordered = TRUE)
+
+  # Step 3a-extra: Remove Duplicates from G
+  observeEvent(input$RemoveDuplicates, {
+    req(kinDiagResult())
+    dup <- kinDiagResult()$list.duplicate
+    G   <- kinGmatResult()$G
+    withProgress(message = "Removing duplicate individuals from G...", value = 0, {
+      kinDedupResult(removeDuplicatesFromG(G, dup))
+    })
+  })
+
+  output$kinDedupMsg <- renderText({
+    req(kinDedupResult())
+    kinDedupResult()$msg
+  })
+
+  output$DownloadGdedup <- downloadHandler(
+    filename = function() paste0("Gmat_dedup_", Sys.Date(), ".csv"),
+    content  = function(file) {
+      req(kinDedupResult())
+      write.csv(kinDedupResult()$G_clean, file)
+    }
+  )
+
+  # Step 3b: Fine-tune G
+  observeEvent(input$RunKinTune, {
+    req(kinGmatResult())
+    req(input$kinTuneMethod != "none")
+    withProgress(message = "Fine-tuning G Matrix...", value = 0, {
+      kinTuneResult(getTunedG(
+        kinGmatResult()$G,
+        method = input$kinTuneMethod,
+        pblend = input$kinPblend
+      ))
+    })
+  })
+
+  output$kinTuneMsg         <- renderText({
+    req(kinTuneResult())
+    paste(kinTuneResult()$msg, kinTuneResult()$check_msg, sep = "\n")
+  })
+  output$kinTuneDiagPlot    <- renderPlot({ req(kinTuneResult()); print(kinTuneResult()$check$plot.diag) },    bg="white")
+  output$kinTuneOffdiagPlot <- renderPlot({ req(kinTuneResult()); print(kinTuneResult()$check$plot.offdiag) }, bg="white")
+
+  output$DownloadGtuned <- downloadHandler(
+    filename = function() paste0("G_tuned_", Sys.Date(), ".csv"),
+    content  = function(file) write.csv(kinTuneResult()$Gb, file)
+  )
+
+  # Heatmap — triggered by button; uses tuned G if available, else raw Gmat
+  kinHeatmapResult <- reactiveVal(NULL)
+
+  observeEvent(input$RunKinHeatmap, {
+    G <- if (!is.null(kinTuneResult())) kinTuneResult()$Gb else {
+      req(kinGmatResult()); kinGmatResult()$G
+    }
+    withProgress(message = "Generating Kinship Heatmap...", value = 0, {
+      kinHeatmapResult(G)
+    })
+  })
+
+  output$kinHeatmap <- renderPlot({
+    req(kinHeatmapResult())
+    ASRgenomics::kinship.heatmap(kinHeatmapResult())
+  }, bg="white")
+
+  # Step 3c: Kinship PCA
+  observeEvent(input$RunKinPCA, {
+    G <- if (!is.null(kinTuneResult())) kinTuneResult()$Gb else {
+      req(kinGmatResult()); kinGmatResult()$G
+    }
+    withProgress(message = "Running Kinship PCA...", value = 0, {
+      kinPCAResult(getKinshipPCA(G, ncp = input$kinNcp))
+    })
+  })
+
+  output$kinPCAScree <- renderPlot({
+    req(kinPCAResult())
+    p <- kinPCAResult()$plot.scree
+    if (!is.null(p)) print(p) else plot.new()
+  }, bg="white")
+
+  output$kinPCAPlot <- renderPlot({
+    req(kinPCAResult())
+    # try $plot.pca first (documented name), fall back to $plot.ind
+    p <- if (!is.null(kinPCAResult()$plot.pca)) kinPCAResult()$plot.pca else kinPCAResult()$plot.ind
+    if (!is.null(p)) print(p) else plot.new()
+  }, bg="white")
+
   output$ExportImpGenoDF <- downloadHandler(
     filename = function() {
       "ImputedGenotypesDF.txt"
     },
     content = function(file) {
-      
+
       write.table(as.data.frame(GenoImp_DF()), file, row.names = FALSE)
     }
   )

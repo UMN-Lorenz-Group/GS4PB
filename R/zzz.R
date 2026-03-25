@@ -1,23 +1,24 @@
 ### .onLoad function 
 
 .onLoad <- function(libname, pkgname) {
-  library(reticulate)
 
   envname <- "GS4PB_CondaEnv"
-  ## Activate Python virtual environment on package load
-  #if (virtualenv_exists(envname)) {
-   # use_virtualenv(envname, required = TRUE)
-  #} else {
-   # warning("Python virtual environment not found. Run setup_python_env() to create it.")
-  #}
-
-  # Use Conda instead of Virtualenv
-  if (envname %in% reticulate::conda_list()$name) {
-    reticulate::use_condaenv(envname, required = TRUE)
-  } else {
-    warning("Conda environment not found. Run GS4PB:::setup_python_env() to create it.")
-  }
-
+  # Use Conda — non-fatal if Conda or the env is absent (e.g. during R CMD check)
+  tryCatch({
+    if (envname %in% reticulate::conda_list()$name) {
+      reticulate::use_condaenv(envname, required = FALSE)
+    } else {
+      packageStartupMessage(
+        "Conda environment '", envname, "' not found. ",
+        "Run GS4PB:::setup_python_env() to create it."
+      )
+    }
+  }, error = function(e) {
+    packageStartupMessage(
+      "Conda not available or errored on load. ",
+      "Run GS4PB:::setup_python_env() after installing Miniconda."
+    )
+  })
 
 }
 

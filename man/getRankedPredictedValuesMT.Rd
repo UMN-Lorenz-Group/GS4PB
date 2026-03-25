@@ -2,29 +2,36 @@
 % Please edit documentation in R/MT_Functions.R
 \name{getRankedPredictedValuesMT}
 \alias{getRankedPredictedValuesMT}
-\title{Title of getRankedPredictedValuesMT}
+\title{Perform multi-trait genomic prediction (getRankedPredictedValuesMT)}
 \usage{
 getRankedPredictedValuesMT(
   Data_Table_Num_Filt_List,
   nTraits,
   trait,
   GPModelMT,
-  optTS = NULL
+  optTS = NULL,
+  b_iter = 5000,
+  b_burnin = 1000,
+  b_thin = 10,
+  b_R2 = 0.5,
+  b_digits = 4,
+  A_ext = NULL
 )
 }
 \arguments{
-\item{Data_Table_Num_Filt_List}{Description of Data_Table_Num_Filt_List.}
+\item{Data_Table_Num_Filt_List}{List. A list containing the data tables.}
 
-\item{nTraits}{Description of nTraits.}
+\item{nTraits}{Ineger. Integer specifying the number of traits.}
 
-\item{trait}{Description of trait.}
+\item{trait}{Character. Character specifying the traits to be included in the model.}
 
-\item{GPModelMT}{Description of GPModelMT.}
+\item{GPModelMT}{Character. Character specifying the MT model for fitting the genomic prediction model. Default value is set to "BRR".
+Other options include "RKHS" and "Spike-Slab"}
 
-\item{optTS=NULL}{Description of optTS=NULL.}
+\item{optTS}{Logical.  Logical value specifying whether the optimal train set is used. The defaul NULL value allows the use of the complete training set for training the model.}
 }
 \value{
-Description of what is returned.
+List. A list containing the output data frames containing the predicted and observed values for the training and target populations
 }
 \description{
 Description of what getRankedPredictedValuesMT does.

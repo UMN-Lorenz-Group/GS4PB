@@ -18,6 +18,6 @@ Description of what VCFtoDF does.
 \examples{
 \dontrun{
 # Example usage of VCFtoDF
-result <- VCFtoDF(...) 
+result <- VCFtoDF(...)
 }
 }

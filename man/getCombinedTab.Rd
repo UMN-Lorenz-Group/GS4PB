@@ -4,7 +4,15 @@
 \alias{getCombinedTab}
 \title{Title of getCombinedTab}
 \usage{
-getCombinedTab(outputListME, TraitME, IDColsME, IDColME, fitEnvCov)
+getCombinedTab(
+  outputListME,
+  TraitME,
+  IDColsME,
+  IDColME,
+  envVar,
+  fitEnvCov,
+  reaction
+)
 }
 \arguments{
 \item{outputListME}{Description of outputListME.}

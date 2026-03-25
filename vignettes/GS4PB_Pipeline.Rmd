@@ -1,0 +1,485 @@
+---
+title: "GS4PB Pipeline: From VCF to GEBV Predictions"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{GS4PB Pipeline: From VCF to GEBV Predictions}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval = FALSE, echo = TRUE, comment = "#>")
+```
+
+# Overview
+
+**GS4PB** provides an end-to-end genomic selection pipeline for plant breeding.
+This vignette walks through the complete workflow — from loading a VCF file to
+producing GEBV predictions — covering three scenarios:
+
+| Workflow | Description |
+|----------|-------------|
+| **SE:ST** | Single-Environment, Single-Trait |
+| **SE:MT** | Single-Environment, Multi-Trait |
+| **ME**    | Multi-Environment |
+
+All code chunks use `eval = FALSE` because the pipeline requires real genotype
+and phenotype files. Copy, fill in the `<...>` placeholders, and run interactively.
+
+A copy of the raw R script is also installed with the package:
+
+```{r script-path}
+system.file("pipeline", "GS4PB_Pipeline.R", package = "GS4PB")
+```
+
+---
+
+# Prerequisites
+
+```{r prereqs}
+# install.packages("path/to/GS4PB_0.0.0.9000.tar.gz",
+#                  repos = NULL, type = "source")
+
+library(GS4PB)
+rTASSEL::initializeTASSEL()   # start the JVM before any rTASSEL calls
+```
+
+## Define Paths and Parameters
+
+Replace every `<...>` with real paths and column names before running.
+
+```{r inputs}
+vcf_path       <- "<path/to/genotype.vcf>"
+se_pheno_path  <- "<path/to/se_phenotype.csv>"
+me_pheno_path  <- "<path/to/me_phenotype.csv>"
+target_id_path <- "<path/to/target_ids.txt>"   # optional
+out_dir        <- "<path/to/output_directory>"
+
+## SE trait names
+trait_se   <- "Yield"
+traits_mt  <- c("Yield", "Height", "Maturity")
+
+## ME phenotype column names (standardised internally)
+strain_col <- "Strain"
+env_col    <- "Env"
+loc_col    <- "Location"   # or NULL
+yr_col     <- "Year"       # or NULL
+trait_me   <- c("Yield")
+
+## VCF filter parameters
+MAF_thresh       <- 0.05
+site_min_cnt     <- 0.80
+taxa_min_nr_miss <- 0.80
+
+## CV parameters
+k_folds <- 5
+n_iter  <- 5
+cv_met  <- "CV1"   # "CV1" = by observation; "CV2" = by factor level
+```
+
+---
+
+# Section 1 — Genotypic Data Processing
+
+This section is shared by all three workflows.
+
+## 1a — Load VCF
+
+`rTASSEL` reads the VCF into JVM memory; `getGenoTas_to_DF()` converts it to an
+R tibble with columns `SNPID`, `Chrom`, `Pos`, `REF`, `ALT`, and one column per
+sample (coded 0/1/2).
+
+```{r load-vcf}
+tas     <- getTasObj(vcf_path)
+geno_df <- getGenoTas_to_DF(tas)
+cat(getGenoQCStats(geno_df))
+```
+
+## 1b — Filter Markers (Filt1)
+
+Remove SNPs below the MAF threshold or with low call rate.
+
+```{r filt1}
+tas_filt1  <- getFilteredSitesGenoData(tas,
+                siteMinCnt = site_min_cnt,
+                MAF        = MAF_thresh)
+geno_filt1 <- getGenoTas_to_DF(tas_filt1)
+cat(getGenoQCStatsFilt1(geno_df, geno_filt1,
+                        missSitesTH = 1 - site_min_cnt,
+                        MAFTH       = MAF_thresh))
+```
+
+## 1c — Filter Samples (Filt2)
+
+Remove individuals with high missingness.
+
+```{r filt2}
+tas_filt2  <- getFilteredTaxaGenoData(tas_filt1,
+                MinNotMissing = taxa_min_nr_miss)
+geno_filt2 <- getGenoTas_to_DF(tas_filt2)
+cat(getGenoQCStatsFilt2(geno_filt1, geno_filt2,
+                        missIndTH = 1 - taxa_min_nr_miss))
+```
+
+## 1d — Imputation
+
+Choose **one** method; comment out the others.
+
+```{r impute}
+## Option A: Numeric (mean) imputation via rTASSEL  [DEFAULT]
+tas_imp  <- getImputedData_Num(tas_filt2, nN = 5, Dist = "Euclidean")
+geno_imp <- getGenoTas_to_DF(tas_imp)
+
+## Option B: LD-KNNi imputation via rTASSEL
+# tas_imp  <- getImputedData_LDKNNI(tas_filt2, l = 50, k = 5)
+# geno_imp <- getGenoTas_to_DF(tas_imp)
+
+## Option C: AlphaPlantImpute (external tool required)
+# getGenoData_API(tas_filt2)              # writes current_GenoTable.genotypes
+# # ... run AlphaPlantImpute externally ...
+# geno_imp <- getImpGenoData_API(vcfIDTab) # reads back imputed_out.genotypes
+```
+
+## 1e — (Optional) Genomic Kinship / G Matrix
+
+Compute the VanRaden genomic relationship matrix.  The tuned `G_tuned` can be
+passed as a custom kernel to SE:MT and ME models.
+
+```{r gmat}
+qc_result <- getQCFilteredM(geno_imp, maf = MAF_thresh)
+M_clean   <- qc_result$M.clean
+
+gmat_out  <- getGmat(M_clean, method = "VanRaden")
+G         <- gmat_out$G
+
+## Detect and remove duplicate individuals
+diag_out  <- getKinshipDiag(G, duplicate.thr = 0.98)
+cat(diag_out$msg)
+
+if (!is.null(diag_out$list.duplicate) &&
+    nrow(diag_out$list.duplicate) > 0) {
+  dedup_out <- removeDuplicatesFromG(G, diag_out$list.duplicate)
+  G         <- dedup_out$G_clean
+  cat(dedup_out$msg)
+}
+
+## Tune G for positive-definiteness
+G_tuned    <- getTunedG(G, method = "blend", pblend = 0.05)$Gb
+
+## PCA for visualisation
+pca_result <- getKinshipPCA(G_tuned, ncp = 20)
+# plot(pca_result$ind$coord[, 1], pca_result$ind$coord[, 2])
+```
+
+---
+
+# Section 2 — SE Workflow: Single-Environment
+
+## 2a — Load SE Phenotype
+
+The CSV must have one row per individual, with a strain ID column and one or more
+trait columns.
+
+```{r se-pheno}
+pheno_se   <- read.csv(se_pheno_path, stringsAsFactors = FALSE)
+target_ids <- NULL   # or readLines(target_id_path)
+```
+
+## 2b — Merge Genotype + SE Phenotype
+
+`getMergedData()` aligns strain IDs across genotype and phenotype data frames and
+returns a list of train and test (target) subsets.
+
+```{r se-merge}
+merged    <- getMergedData(gt2d     = geno_imp,
+                           Pheno    = pheno_se,
+                           testIDs  = target_ids)
+# merged[[1]] = training data frame
+# merged[[2]] = test (target) data frame; NULL if target_ids = NULL
+```
+
+## 2c — Process Data
+
+Remove rows where the focal trait is `NA`.
+
+```{r se-process}
+proc_data <- getProcessedData(merged, trait = trait_se)
+```
+
+## 2d — Sample Candidate Set
+
+```{r se-predict-data}
+n_cand    <- nrow(proc_data[[1]])   # use all training individuals
+pred_data <- getPredictionData(proc_data, noCandidates = n_cand)
+```
+
+## 2e — (Optional) Training Set Optimization via Genetic Algorithm
+
+Uncomment to select an optimal training subset with STPGA.
+
+```{r opt-ts}
+# Single-objective (errorstat = 1 value) — uses GenAlgForSubsetSelection
+# ga_params <- list(
+#   errorstat    = "MSE", InitPop = NULL, npop = 50, nelite = 5,
+#   mutprob = 0.01, mutintensity = 1, niterations = 100,
+#   minitbefstop = 10, tabu = FALSE, tabumemsize = 5,
+#   plotiters = FALSE, lambda = 0.5, mc.cores = 2
+# )
+#
+# Multi-objective (errorstat = vector, length > 1) — uses GenAlgForSubsetSelectionMO
+# ga_params <- list(
+#   errorstat           = c("PEVmean", "meanCD"),
+#   selectionstatstypes = c("min", "min"),   # "min" or "max" per stat
+#   plotdirections      = c("min", "min"),
+#   InitPop = NULL, npop = 100, mutprob = 0.8, mutintensity = 1,
+#   niterations = 500, plotiters = FALSE, lambda = 1e-6, mc.cores = 2
+# )
+# n_train_select <- 80
+#
+# opt_ts  <- getOptimalTS(pred_data, trait = trait_se, nTraits = 1,
+#                         noCandidates = n_cand,
+#                         nTrainToSelect = n_train_select,
+#                         GAParameters = ga_params)
+# rand_ts <- getRandomTS(pred_data, trait = trait_se, nTraits = 1,
+#                        noCandidates = n_cand,
+#                        nTrainToSelect = n_train_select)
+# ts_cmp  <- getTSComparisons(pred_data,
+#                              Train_STPGA  = opt_ts,
+#                              Train_Random = rand_ts,
+#                              trait = trait_se, nTraits = 1,
+#                              testIds = rownames(pred_data[[2]]))
+# print(ts_cmp)
+# opt_ids <- opt_ts[[2]]   # selected training strain IDs
+opt_ids <- NULL            # NULL = use all training data
+```
+
+---
+
+## SE:ST — Single-Trait
+
+### 2f — SE:ST Cross-Validation
+
+5-fold CV using **bWGR** (emRR, emBB, emBL).  Returns prediction ability (PA)
+and RMSE per model.
+
+```{r se-st-cv}
+cv_st <- getemCVR(pred_data,
+                  trait  = trait_se,
+                  nTraits = 1,
+                  k      = k_folds,
+                  nIter  = n_iter)
+print(cv_st)
+```
+
+### 2g — SE:ST GEBV Prediction
+
+Trains on the training set (or `opt_ids` subset) and ranks all individuals.
+
+```{r se-st-gebv}
+gebv_st <- getRankedPredictedValues(
+  pred_data,
+  nTraits  = 1,
+  trait    = trait_se,
+  GPModel  = "rrBLUP (rrBLUP)",  # "BayesB (bWGR)", "emRR (bWGR)", etc.
+  optTS    = opt_ids
+)
+# gebv_st[[1]] = ranked training predictions (LineID, Predicted_Value)
+# gebv_st[[2]] = ranked target predictions   (LineID, Predicted_Value, Reliability)
+
+writeCVOutTable(as.data.frame(cv_st), type = "ST", outDirPath = out_dir)
+writeGPOutTable(gebv_st[[1]],         type = "ST", outDirPath = out_dir)
+```
+
+---
+
+## SE:MT — Multi-Trait
+
+### 2h — SE:MT Cross-Validation
+
+Bayesian multi-trait MCMC via **BGLR**.  Passing `A_ext = G_tuned` uses the
+genomic kinship matrix as the relationship kernel; set `A_ext = NULL` to
+estimate the A matrix internally with `rrBLUP::A.mat()`.
+
+```{r se-mt-cv}
+cv_mt <- getMTCVR(
+  pred_data,
+  trait    = traits_mt,
+  nTraits  = length(traits_mt),
+  k        = k_folds,
+  nIter    = n_iter,
+  CVMet    = cv_met,
+  b_iter   = 5000, b_burnin = 1000, b_thin = 10,
+  b_R2     = 0.5,  b_digits = 4,
+  A_ext    = G_tuned   # NULL = use A.mat() internally
+)
+print(summarize_MT_Fits(cv_mt, CVMet = cv_met, traits = traits_mt))
+```
+
+### 2i — SE:MT GEBV Prediction
+
+```{r se-mt-gebv}
+gebv_mt <- getRankedPredictedValuesMT(
+  pred_data,
+  nTraits   = length(traits_mt),
+  trait     = traits_mt,
+  GPModelMT = "BRR (BGLR)",   # "RKHS (BGLR)", "Spike-Slab (BGLR)"
+  optTS     = opt_ids,
+  b_iter    = 5000, b_burnin = 1000, b_thin = 10,
+  b_R2      = 0.5,  b_digits = 4,
+  A_ext     = G_tuned
+)
+# gebv_mt[[1]] = ranked training predictions
+# gebv_mt[[2]] = ranked target predictions
+
+writeCVOutTable(cv_mt,        type = "MT", outDirPath = out_dir)
+writeGPOutTable(gebv_mt[[1]], type = "MT", outDirPath = out_dir)
+```
+
+---
+
+# Section 3 — ME Workflow: Multi-Environment
+
+## 3a — Load ME Phenotype & Standardise Column Names
+
+The ME phenotype CSV must have one row per observation (strain × environment).
+`stdizePhVarNames()` renames user-supplied column names to the standard names
+expected by downstream ME functions.
+
+```{r me-pheno}
+pheno_me_raw <- read.csv(me_pheno_path, stringsAsFactors = FALSE)
+id_cols_me   <- colnames(pheno_me_raw)[!colnames(pheno_me_raw) %in% trait_me]
+
+std_out      <- stdizePhVarNames(pheno_me_raw,
+                  IDColsME   = id_cols_me,
+                  StrainME   = strain_col,
+                  EnvVarME   = env_col,
+                  LocMEColVar = loc_col,
+                  YrMEColVar  = yr_col)
+pheno_me_mod <- std_out[[1]]   # standardised phenotype data frame
+id_cols_mod  <- std_out[[2]]   # updated ID column vector
+env_var_mod  <- std_out[[3]]   # standardised environment variable name
+
+## Format into per-trait data frames required by getMergedDataME
+pheno_me_fmt <- getPhenoMEData(PhenoME    = pheno_me_mod,
+                               TraitME    = trait_me,
+                               nSelTraits = length(trait_me),
+                               IDColsME   = id_cols_mod,
+                               StrainME   = strain_col)
+```
+
+## 3b — Merge ME Genotype + Phenotype
+
+```{r me-merge}
+merged_me <- getMergedDataME(phData    = pheno_me_fmt,
+                              genoImp   = geno_imp,
+                              TargetIDs = NULL)
+DT_list   <- merged_me[[1]]   # list of phenotype data frames, one per trait
+geno_list <- merged_me[[2]]   # list of genotype matrices, one per trait
+```
+
+## 3c — (Optional) Enviromics: Build Environmental Kernel (KE)
+
+`KE` is required for `FitEnvModels = TRUE` in ME CV and prediction.
+Skip this block and set `KE <- NULL` if no environmental covariate data
+is available.
+
+```{r enviromics}
+# coords_df <- read.csv("<path/to/location_coordinates.csv>")
+# # Expected columns: Location, Country, Lat, Long
+#
+# env_data  <- getEnvData(coords_df,
+#                startDate = "2020-04-01",
+#                endDate   = "2020-10-31")
+#
+# env_ker   <- getEnvKernel(env_data, process = TRUE, Gaussian = FALSE)
+# env_ker   <- syncEnvPhenoDat(env_ker,
+#                LocCoord = coords_df,
+#                OtherLoc = FALSE)
+# KE        <- env_ker$W          # symmetric env × env kernel
+# plotEnvRel(env_ker, outDirPath = out_dir)
+
+KE <- NULL   # replace with env_ker$W when enviromics data is available
+```
+
+## 3d — ME Cross-Validation
+
+Multi-environment CV using **BGGE** kernels.
+`KG = G_tuned` supplies the genomic kinship matrix; `KG = NULL` estimates it
+internally. `FitEnvModels = !is.null(KE)` automatically enables/disables the
+environmental component.
+
+```{r me-cv}
+cv_me <- getME_CV(
+  DT_1_Filt_List = DT_list,
+  genoDat_List   = geno_list,
+  traits         = trait_me,
+  KG             = G_tuned,        # NULL = estimated internally
+  KE             = KE,
+  CVMet          = cv_met,
+  factVar        = env_var_mod,
+  K              = k_folds,
+  NIter          = n_iter,
+  KMethod        = "Linear",       # "Linear" or "Gaussian"
+  FitEnvModels   = !is.null(KE),
+  fixedME        = NULL,
+  envVar         = env_var_mod,
+  IDColsME       = id_cols_mod,
+  IDColME        = env_var_mod
+)
+cv_me_summary <- summarize_ME_CV_fits(cv_me, cvMet = cv_met)
+print(cv_me_summary)
+writeCVOutTable(cv_me_summary, type = "ME", outDirPath = out_dir)
+```
+
+## 3e — ME GEBV Prediction (Leave-One-Factor-Out)
+
+LOFO prediction masks one environment at a time.
+`maskFactrLev` specifies the environment(s) to mask; `maskProp = 1` masks all
+genotypes in that level.
+
+```{r me-gebv}
+me_pred <- fitMEModels_LOFO_Pred(
+  DT_1_Filt_List = DT_list,
+  genoDat_List   = geno_list,
+  traits         = trait_me,
+  KG             = G_tuned,
+  KE             = KE,
+  factrVar       = env_var_mod,
+  maskFactrLev   = unique(pheno_me_mod[[env_var_mod]])[1],
+  maskProp       = 1,
+  nSampleReps    = 1,
+  fixedME        = NULL,
+  envVar         = env_var_mod,
+  IDColsME       = id_cols_mod,
+  IDColME        = env_var_mod,
+  KMethod        = "Linear",
+  FitEnvModels   = !is.null(KE)
+)
+```
+
+## 3f — Combine and Write ME Output
+
+```{r me-output}
+me_combined <- getCombinedTab(
+  outputListME = me_pred,
+  TraitME      = trait_me,
+  IDColsME     = id_cols_mod,
+  IDColME      = env_var_mod,
+  envVar       = env_var_mod,
+  fitEnvCov    = !is.null(KE),
+  reaction     = FALSE
+)
+writeGPOutTable(me_combined, type = "ME", outDirPath = out_dir)
+cat("Pipeline complete. Results written to:", out_dir, "\n")
+```
+
+---
+
+# Accessing the Raw Script
+
+The bare R script (no prose, all executable code) is installed alongside the
+package and can be opened directly:
+
+```{r open-script}
+file.edit(system.file("pipeline", "GS4PB_Pipeline.R", package = "GS4PB"))
+```

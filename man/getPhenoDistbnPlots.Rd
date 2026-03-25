@@ -4,7 +4,7 @@
 \alias{getPhenoDistbnPlots}
 \title{Title of getPhenoDistbnPlots}
 \usage{
-getPhenoDistbnPlots(DT_1_Filt_List, TraitME, nTrt, outDirPath)
+getPhenoDistbnPlots(DT_1_Filt_List, TraitME, nTrt, EnvVar, outDirPath)
 }
 \arguments{
 \item{DT_1_Filt_List}{Description of DT_1_Filt_List.}

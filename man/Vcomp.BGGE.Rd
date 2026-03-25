@@ -18,7 +18,7 @@ Vcomp.BGGE(model, env, gid, digits = digits, alfa = 0.1)
 \item{alfa}{= 0.1 Description of alfa = 0.1.}
 }
 \value{
-Description of what is returned.
+.
 }
 \description{
 Description of what Vcomp.BGGE does.

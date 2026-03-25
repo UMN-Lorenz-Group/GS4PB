@@ -2,26 +2,42 @@
 % Please edit documentation in R/MT_Functions.R
 \name{getMTCVR}
 \alias{getMTCVR}
-\title{Title of getMTCVR}
+\title{Perform cross validation for multi-trait genomic prediction in CV1 and CV2 schemes #'}
 \usage{
-getMTCVR(Data_Table_Num_Filt_List, trait, nTraits, k, nIter)
+getMTCVR(
+  Data_Table_Num_Filt_List,
+  trait,
+  nTraits,
+  k,
+  nIter,
+  CVMet,
+  b_iter = 5000,
+  b_burnin = 1000,
+  b_thin = 10,
+  b_R2 = 0.5,
+  b_digits = 4,
+  A_ext = NULL
+)
 }
 \arguments{
-\item{Data_Table_Num_Filt_List}{Description of Data_Table_Num_Filt_List.}
+\item{Data_Table_Num_Filt_List}{List. A list containing the data tables.}
 
-\item{trait}{Description of trait.}
+\item{trait}{Character. Character specifying the traits to be included in the model.}
 
-\item{nTraits}{Description of nTraits.}
+\item{nTraits}{Ineger. Integer specifying the number of traits.}
 
-\item{k}{Description of k.}
+\item{k}{Integer. Integer specifying the number of folds in k-fold CV}
 
-\item{nIter}{Description of nIter.}
+\item{nIter}{Integer. Integer value specifying the number of iterations.}
+
+\item{CVMet}{Character. Character specifying the cross validation scheme with the default value set to "CV1".
+Options include "CV1" and "CV2"}
 }
 \value{
-Description of what is returned.
+a data frame that contains output stats such as prediction ability for the mlti-trait models .
 }
 \description{
-Description of what getMTCVR does.
+Perform cross validation for multi-trait genomic prediction in CV1 and CV2 schemes #'
 }
 \examples{
 \dontrun{

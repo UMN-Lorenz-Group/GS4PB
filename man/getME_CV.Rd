@@ -2,7 +2,7 @@
 % Please edit documentation in R/ME_Functions.R
 \name{getME_CV}
 \alias{getME_CV}
-\title{Title of getME_CV}
+\title{Multi-Environment Cross-Validation (getME_CV)}
 \usage{
 getME_CV(
   DT_1_Filt_List,
@@ -11,63 +11,86 @@ getME_CV(
   KG = NULL,
   KE = NULL,
   CVMet,
-  factVar,
+  factVar = "Env",
   K,
   NIter,
   KMethod = "Linear",
   FitEnvModels = FALSE,
-  fixedME = fixME,
-  envVar = varEnv,
+  Reaction = FALSE,
+  dimension_KE = NULL,
+  bandwidth = 1,
+  quantil = 0.5,
+  fixedME,
+  envVar,
   IDColsME,
   IDColME,
-  LocME = LocationME,
-  YrME = YearME
+  LocME,
+  YrME,
+  b_iter = 1000,
+  b_burnin = 200,
+  b_thin = 10,
+  b_tol = 1e-10,
+  b_R2 = 0.5,
+  b_digits = 4
 )
 }
 \arguments{
-\item{DT_1_Filt_List}{Description of DT_1_Filt_List.}
+\item{DT_1_Filt_List}{List of phenotype data frames after merging with genotype data.}
 
-\item{genoDat_List}{Description of genoDat_List.}
+\item{genoDat_List}{List of genotype data frames after merging with phenotype data.}
 
-\item{traits}{Description of traits.}
+\item{traits}{Character vector/ Character specifying the traits to analyze.}
 
-\item{CVMet}{Description of CVMet.}
+\item{KG}{Matrix or NULL. Genotypic relationship matrix. Default = NULL, in which case
+the kernel is estimated internally. A user-defined matrix can be supplied.}
 
-\item{factVar}{Description of factVar.}
+\item{KE}{Matrix or NULL. Environmental relationship matrix. Default = NULL.
+Required if `FitEnvModels = TRUE`.}
 
-\item{K}{Description of K.}
+\item{CVMet}{Character. Cross-validation scheme. Default = "CV1".
+Options: "CV1", "CV2", "CV0", "CV00","CV-LOFO".}
 
-\item{NIter}{Description of NIter.}
+\item{factVar}{Character. Factor variable to be used in the model for leave-one-factor-out CV.}
 
-\item{IDColsME}{Description of IDColsME.}
+\item{K}{Integer. Number of folds in k-fold cross-validation.}
 
-\item{IDColME}{Description of IDColME.}
+\item{NIter}{Integer. Number of replicates for cross-validation.}
 
-\item{KG=NULL}{Description of KG=NULL.}
+\item{KMethod}{Character. Kernel method for estimating genotypic and
+genotype × environment kernels. Default = "Linear". Option: "Gaussian".}
 
-\item{KE=NULL}{Description of KE=NULL.}
+\item{FitEnvModels}{Logical. Whether to include environmental covariates in the model.
+Default = FALSE. If TRUE, a user-provided `KE` must be supplied.}
 
-\item{KMethod="Linear"}{Description of KMethod="Linear".}
+\item{fixedME}{Character. Variable specifying fixed effects in the model.}
 
-\item{FitEnvModels=FALSE}{Description of FitEnvModels=FALSE.}
+\item{envVar}{Character. Variable specifying the environmental factor.}
 
-\item{fixedME=fixME}{Description of fixedME=fixME.}
+\item{IDColsME}{Character vector of ID columns (e.g., "Strain", "Location", "Strain-Location").}
 
-\item{envVar=varEnv}{Description of envVar=varEnv.}
+\item{IDColME}{Character. Unique identifier column.}
 
-\item{LocME=LocationME}{Description of LocME=LocationME.}
+\item{LocME}{Character vector. Locations to include. Default = "All" to use all locations,
+or specify one or more locations.}
 
-\item{YrME=YearME}{Description of YrME=YearME.}
+\item{YrME}{Character vector. Years to include. Default = "All" to use all years,
+or specify one or more years.}
 }
 \value{
-Description of what is returned.
+A list containing cross-validation results, including predicted values,
+  model fit statistics, and performance metrics.
 }
 \description{
-Description of what getME_CV does.
+Performs cross-validation for genomic prediction in multi-environment trials,
+allowing flexible kernel estimation, environmental modeling, and user-defined
+cross-validation schemes.
 }
 \examples{
 \dontrun{
-# Example usage of getME_CV
-result <- getME_CV(...)
+# Example usage:
+result <- getME_CV(
+  DT_1_Filt_List, genoDat_List, traits = c("Yield"),
+  CVMet = "CV1", K = 5, NIter = 10
+)
 }
 }

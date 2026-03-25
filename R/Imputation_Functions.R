@@ -13,6 +13,7 @@
 #' # Example usage of getImputedData_LDKNNI
 #' result <- getImputedData_LDKNNI(...)
 #' }
+#' @export
 getImputedData_LDKNNI <- function(FiltGeno,l,k){ 
 
    tasGenoImp <- rTASSEL::imputeLDKNNi(FiltGeno, highLDSSites = l, knnTaxa = k, maxDistance = 1e+07)
@@ -34,6 +35,7 @@ getImputedData_LDKNNI <- function(FiltGeno,l,k){
 #' # Example usage of getImputedData_Num
 #' result <- getImputedData_Num(...)
 #' }
+#' @export
 getImputedData_Num <- function(FiltGeno,nN,Dist){
   
   
@@ -55,6 +57,7 @@ getImputedData_Num <- function(FiltGeno,nN,Dist){
 #' # Example usage of getGenoData_API
 #' result <- getGenoData_API(...)
 #' }
+#' @export
 getGenoData_API <- function(FiltGeno){
   
     filtGenoMat <- as.matrix(FiltGeno)
@@ -78,8 +81,7 @@ getGenoData_API <- function(FiltGeno){
     write.table(vcfIDTab,"currentVCFIDTab.txt",quote=FALSE,sep="\t",row.names=FALSE,col.names=TRUE)
 	
     write.table(currentGenoMat,"current_GenoTable.genotypes",quote=FALSE,sep=" ",row.names=FALSE,col.names=FALSE)
- 
-   return(vcfIDTab)
+
 }
 
 #####
@@ -96,6 +98,7 @@ getGenoData_API <- function(FiltGeno){
 #' # Example usage of getImpGenoData_API
 #' result <- getImpGenoData_API(...)
 #' }
+#' @export
 getImpGenoData_API <- function(vcfIDTab){
     
 	# vcfIDTab_DF <- as.data.frame(vcfIDTab)

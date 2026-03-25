@@ -439,7 +439,7 @@ extract_GIS_terra <- function(covraster = NULL, Latitude = NULL, Longitude = NUL
 #' # Example usage of getEnvData
 #' result <- getEnvData(...)
 #' }
-
+#' @export
 getEnvData <- function(Coord_Data_Tab,startDate,endDate){
     
 	Dat_Loc_Coords_Filter <- Coord_Data_Tab
@@ -483,7 +483,7 @@ getEnvData <- function(Coord_Data_Tab,startDate,endDate){
 #' # Example usage of getEnvKernel
 #' result <- getEnvKernel(...)
 #' }
-
+#' @export
 getEnvKernel <- function(Env.Data,process=FALSE,Gaussian=FALSE){
    
     env.Dat <- Env.Data
@@ -491,14 +491,14 @@ getEnvKernel <- function(Env.Data,process=FALSE,Gaussian=FALSE){
 	if(process==FALSE){
 	   
 		var3 <- c("T2M","T2M_MAX","T2M_MIN","PRECTOT","WS2M","RH2M","T2MDEW","ALLSKY_SFC_LW_DWN","ALLSKY_SFC_SW_DWN")
-		EC.Dat = W_matrix(env.data = env.Dat,env.id="env", var.id = var3) 
-		KE <- list(W = env_kernel(env.data = EC.Dat,gaussian=Gaussian)[[2]])
+		EC.Dat = EnvRtype::W_matrix(env.data = env.Dat,env.id="env", var.id = var3)
+		KE <- list(W = EnvRtype::env_kernel(env.data = EC.Dat,gaussian=Gaussian)[[2]])
     }else if(process==TRUE){
 	
 		prData <- processWTH(env.data = env.Dat)
 		var4 <- c("T2M","T2M_MAX","T2M_MIN","PRECTOT","WS2M","RH2M","T2MDEW","ALLSKY_SFC_LW_DWN","ALLSKY_SFC_SW_DWN","RTA","VPD","SPV","ETP","PETP","GDD","FRUE","T2M_RANGE")
 			
-		EC.Dat.Pr = W_matrix(env.data = prData,env.id="env", var.id = var4) 
+		EC.Dat.Pr = EnvRtype::W_matrix(env.data = prData,env.id="env", var.id = var4)
 		rmECVar <- which(apply(EC.Dat.Pr,2,function(x) length(which(x %in% NaN)))!=0)
 		EC.Dat.Pr.Filt <- EC.Dat.Pr[,-rmECVar]
 
@@ -531,12 +531,12 @@ getEnvKernel <- function(Env.Data,process=FALSE,Gaussian=FALSE){
 #' # Example usage of plotEnvRel
 #' result <- plotEnvRel(...)
 #' }
-
+#' @export
 plotEnvRel <- function(KE,outDirPath){
     #dev.off()
 	#### Heatmap of Raw Weather Data  ##key.par=list(mar=c(1,4,2,1))
 	par(oma = c(1, 1, 1, 1), mar = c(5, 4, 4, 2) + 0.1) # Adjust margins to avoid the 'pin' issue
-	Hmp_Plot <- heatmap.2(KE$W,dendrogram="row",Colv=NA,col=bluered(75),scale="none",margins=c(10,10),key=TRUE,keysize=0.8,key.title="Env Relationship",
+	Hmp_Plot <- gplots::heatmap.2(KE$W,dendrogram="row",Colv=NA,col=bluered(75),scale="none",margins=c(10,10),key=TRUE,keysize=0.8,key.title="Env Relationship",
 			  symm=TRUE,key.par=list(mar=c(5,1,1,1)),cexRow=1.5,cexCol=1.5,trace='none')
 
     OFN <- paste(outDirPath,"/","Environmental_Relationship.png",sep="")
@@ -571,7 +571,7 @@ plotEnvRel <- function(KE,outDirPath){
 #' # Example usage of syncEnvPhenoDat
 #' result <- syncEnvPhenoDat(...)
 #' }
-
+#' @export
 syncEnvPhenoDat <- function(KE,LocCoord,OtherLoc){
 
  ke <- KE

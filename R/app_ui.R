@@ -43,8 +43,20 @@ app_ui <- function(request){
 		color: white !important;
 		border-bottom: 2px solid #4CAF50;
 	  }
-	  
-	")) 
+
+	  /* Dark-green notification text */
+	  .shiny-notification {
+	    color: darkgreen !important;
+	    font-weight: bold;
+	    font-size: 125%;
+	  }
+	  .shiny-notification-message {
+	    color: darkgreen !important;
+	    font-weight: bold;
+	    font-size: 125%;
+	  }
+
+	"))
 
 ##
  
@@ -54,6 +66,7 @@ app_ui <- function(request){
   dashboardHeader(title = "GS4PB App"),
   dashboardSidebar(
     sidebarMenu(
+      id = "sidebarMenu",
       menuItem("Home", tabName = "home", icon = icon("home")),
       menuItem("Start GS Pipeline", tabName = "gs_pipeline", icon = icon("play-circle")),
       
@@ -62,7 +75,13 @@ app_ui <- function(request){
                menuSubItem("Filter Genotypic Data",tabName="filterGeno",icon=icon("filter")),
                menuSubItem("Impute Genotypic Data",tabName="imputeGeno",icon=icon("pen"))
       ),
-          
+
+      menuItem("Genetic Data Analysis", tabName="gda_parent", icon=icon("dna"),
+               menuSubItem("Overview",        tabName="gda_home",    icon=icon("info-circle")),
+               menuSubItem("PC Analysis",     tabName="pcaGeno",     icon=icon("chart-area")),
+               menuSubItem("Genomic Kinship", tabName="genoKinship", icon=icon("th"))
+      ),
+
       menuItem("Single Env GP Workflow",tabName = "SE Workflow", icon =icon("project-diagram"),
 	           menuItem("Phenotypic Data Processing", tabName = "phenotypic_data_se", icon = icon("chart-bar")),
                menuItem("Merge Geno-Pheno Data", tabName = "geno_pheno_merge_se", icon = icon("code-branch")),
@@ -98,7 +117,30 @@ app_ui <- function(request){
   dashboardBody(
     useShinyjs(),	
     custom_css,  # Include custom CSS
-	
+    # JS: hide all workflow tabs on load; show relevant ones after workflow selection
+    tags$script(HTML("
+      function sidebarItem(txt) {
+        return $('.sidebar-menu li').filter(function() {
+          return $(this).find('> a > span:first').text().trim() === txt;
+        });
+      }
+      $(document).on('shiny:sessioninitialized', function() {
+        sidebarItem('Genotypic Data Processing').hide();
+        sidebarItem('Genetic Data Analysis').hide();
+        sidebarItem('Single Env GP Workflow').hide();
+        sidebarItem('Multi-env GP Workflow').hide();
+      });
+      $(document).on('shiny:inputchanged', function(e) {
+        if (e.name === 'workflow_select') {
+          var val = e.value;
+          sidebarItem('Genotypic Data Processing').toggle(val === 'SE' || val === 'ME');
+          sidebarItem('Genetic Data Analysis').toggle(val === 'SE' || val === 'ME');
+          sidebarItem('Single Env GP Workflow').toggle(val === 'SE');
+          sidebarItem('Multi-env GP Workflow').toggle(val === 'ME');
+        }
+      });
+    ")),
+
     tabItems(
       tabItem(
         tabName = "home",
@@ -136,6 +178,17 @@ app_ui <- function(request){
         tabName = "gs_pipeline",
         fluidRow(
           column(4,
+            box(width = 12, title = "Select Workflow", solidHeader = TRUE, status = "primary",
+                selectizeInput(
+                  inputId  = "workflow_select",
+                  label    = NULL,
+                  choices  = c("NULL" = "", "Single Environment (SE)" = "SE",
+                               "Multi Environment (ME)"  = "ME"),
+                  selected = NULL,
+                  options  = list(placeholder = "-- Select a workflow --"),
+                  width    = "100%"
+                )
+            ),
             box(width = 12, title = "Set output dir to save log and result files", solidHeader = TRUE, status = "primary",
                 tags$br(),
                 # Button to trigger directory selection
@@ -150,11 +203,7 @@ app_ui <- function(request){
             )),
           column(8,
             box(width = 12, title = "GS Pipeline Instructions", solidHeader = TRUE, status = "primary",
-            tags$h4("The GS pipeline involves steps ranging from genotypic and phenotypic data processing, merging geno and pheno data, optimizing training populations, 
-                    cross-validation of genomic prediction models, and genomic prediction."),
-            tags$img(src="www/GSPipelineInstructions.png", 
-                     class = "img-fluid",  # Bootstrap class for responsive images
-                     style = "max-width: 100%; height: auto;")
+                verbatimTextOutput("pipeline_welcome")
             )
           )
         )
@@ -298,7 +347,226 @@ app_ui <- function(request){
             )
         ) 
      ),
-  
+
+  ### Genetic Data Analysis Home Tab ###
+  tabItem(tabName = "gda_home",
+    fluidRow(
+      column(12,
+        box(width=12, title=tags$strong("Genetic Data Analysis — Overview"),
+            solidHeader=TRUE, status="primary",
+          tags$div(
+            tags$h4(tags$strong("This is an optional step.")),
+            tags$p("The analyses in this section are not required for genomic prediction. You may
+                    proceed directly to the SE or ME workflows after genotype processing. However,
+                    these tools provide valuable insight into the genetic structure of your population
+                    and can inform decisions about population stratification, marker quality, and
+                    relationship matrix construction."),
+            tags$hr(),
+            tags$h4(tags$strong("Available Analyses")),
+            tags$ul(
+              tags$li(tags$strong("PC Analysis"), " — Compute principal components from the genotype
+                      matrix to visualize population structure and stratification."),
+              tags$li(tags$strong("Genomic Kinship (G Matrix)"), " — Estimate a genomic relationship
+                      matrix (G matrix) using marker data. Includes QC filtering, G-matrix construction
+                      (VanRaden, Yang, Legarra, or Price methods), diagnostics, optional fine-tuning
+                      (blend/bend), kinship heatmap, and kinship PCA."),
+              tags$li(tags$strong("Diagnostic GWAS"), tags$em(" — Coming soon."),
+                      " A marker-based association analysis to identify putative QTL before genomic prediction.")
+            ),
+            tags$hr(),
+            tags$p(tags$em("Note: Results from PC Analysis and Genomic Kinship are available
+                             to the GS4PB AI Assistant for interpretation."))
+          )
+        )
+      )
+    )
+  ),
+
+		 ### PC Analysis Tab ###
+		 tabItem(
+		   tabName = "pcaGeno",
+		   fluidRow(
+		     column(4,
+		       box(width=12, title="PC Analysis Settings", solidHeader=TRUE, status="primary",
+		         tags$br(),
+		         selectInput("pcGenoSel", "Select Genotype Table",
+		                     choices = c("Raw"="Raw","Filtered 1"="Filtered 1",
+		                                 "Filtered 2"="Filtered 2","Imputed"="Imputed"),
+		                     selected = "Imputed"),
+		         tags$br(),
+		         numericInput("nPCsComp", "Number of PCs to Compute", value=2, min=2, max=20),
+		         tags$br(),
+		         actionButton("RunPCA", "Run PC Analysis", icon=icon("play"), class="btn btn-primary"),
+		         tags$br(), tags$br(),
+		         tags$h5(tags$strong("Optional: Metadata File")),
+		         tags$h6("Tab-separated or CSV file with at least two columns: one for strain IDs and one for group labels."),
+		         fileInput("infilePCMeta", "Load Metadata File (.txt/.csv)", accept=c(".txt",".csv")),
+		         conditionalPanel(condition="output.pcMetaLoaded",
+		           selectInput("pcStrainCol", "Strain ID Column", choices=NULL),
+		           selectInput("pcGroupCol",  "Group Column",     choices=NULL)
+		         ),
+		         tags$br(),
+		         downloadButton("ExportPCScores", "Export PC Scores"),
+		         tags$br(), tags$br()
+		       )
+		     ),
+		     column(8,
+		       box(width=12, title="PC Plot", solidHeader=TRUE, status="primary",
+		         plotOutput("pcaPlot", height="520px")
+		       ),
+		       tags$br(),
+		       box(width=12, title="PC Scores Table", solidHeader=TRUE, status="info",
+		           collapsible=TRUE, collapsed=TRUE,
+		         DTOutput("pcaTable")
+		       )
+		     )
+		   )
+		 ),
+
+  ### Genomic Kinship Tab ###
+  tabItem(
+    tabName = "genoKinship",
+
+    ## Row 1: QC Filtering
+    fluidRow(
+      column(4,
+        box(width=12, title="Step 1: Marker QC Filtering", solidHeader=TRUE, status="primary",
+            collapsible=TRUE, collapsed=FALSE,
+          selectInput("kinGenoSel", "Select Genotype Table",
+                      choices = c("Raw"="Raw","Filtered 1"="Filtered 1",
+                                  "Filtered 2"="Filtered 2","Imputed"="Imputed"),
+                      selected = "Imputed"),
+          tags$br(),
+          numericInput("kinMAF",      "MAF Threshold",                  value=0.02, min=0, max=0.5, step=0.01),
+          numericInput("kinMarkerCR", "Marker Call Rate Threshold",     value=0.2,  min=0, max=1,   step=0.05),
+          numericInput("kinIndCR",    "Individual Call Rate Threshold", value=0.20, min=0, max=1,   step=0.05),
+          numericInput("kinHetero",   "Heterozygosity Threshold",       value=0.7,  min=0, max=1,   step=0.05),
+          numericInput("kinFis",      "|Fis| Threshold",                value=1,    min=0, max=1,   step=0.05),
+          checkboxInput("kinImpute",  "Impute Missing Genotypes",       value=TRUE),
+          tags$br(),
+          actionButton("RunKinQC", "Run QC Filtering", icon=icon("play"), class="btn btn-primary"),
+          tags$hr(),
+          downloadButton("DownloadMclean", "Download M.clean")
+        )
+      ),
+      column(8,
+        box(width=12, title="QC Filtering Output", solidHeader=TRUE, status="primary",
+            collapsible=TRUE, collapsed=FALSE,
+          verbatimTextOutput("kinQCMsg")
+        ),
+        box(width=12, title="QC Plots", solidHeader=TRUE, status="info",
+            collapsible=TRUE, collapsed=TRUE,
+          tabsetPanel(
+            tabPanel("Heterozygosity", plotOutput("kinQCHeteroz",  height="350px")),
+            tabPanel("MAF",            plotOutput("kinQCMaf",      height="350px")),
+            tabPanel("Missing (Ind)",  plotOutput("kinQCMissInd",  height="350px")),
+            tabPanel("Missing (SNP)",  plotOutput("kinQCMissSNP",  height="350px")),
+            tabPanel("Fis",            plotOutput("kinQCFis",      height="350px"))
+          )
+        )
+      )
+    ),
+
+    ## Row 2: G Matrix Estimation
+    fluidRow(
+      column(4,
+        box(width=12, title="Step 2: Estimate G Matrix", solidHeader=TRUE, status="primary",
+            collapsible=TRUE, collapsed=FALSE,
+          selectInput("kinGmethod", "G Matrix Method",
+                      choices = c("VanRaden"="VanRaden","Yang"="Yang",
+                                  "Legarra"="Legarra","Price"="Price"),
+                      selected = "VanRaden"),
+          tags$br(),
+          actionButton("RunGmat", "Estimate G Matrix", icon=icon("play"), class="btn btn-primary"),
+          tags$br(), tags$br(),
+          downloadButton("DownloadGmat", "Download G Matrix")
+        )
+      ),
+      column(8,
+        box(width=12, title="G Matrix Estimation Output", solidHeader=TRUE, status="primary",
+            collapsible=TRUE, collapsed=FALSE,
+          verbatimTextOutput("kinGmatMsg")
+        )
+      )
+    ),
+
+    ## Row 3: Diagnostics, Fine-tuning & Visualization
+    fluidRow(
+      column(4,
+        box(width=12, title="Step 3: Diagnostics & Visualization", solidHeader=TRUE, status="primary",
+            collapsible=TRUE, collapsed=FALSE,
+          tags$h5(tags$strong("Kinship Diagnostics")),
+          numericInput("kinDupThr", "Duplicate Threshold (off-diagonal)", value=0.98, min=0.5, max=1.0, step=0.01),
+          actionButton("RunKinDiag", "Run Diagnostics", icon=icon("search"), class="btn btn-info"),
+          tags$hr(),
+          tags$h5(tags$strong("Remove Duplicates from G")),
+          tags$p(tags$small(tags$em("Removes one individual per duplicate pair (keeps the first of each pair). Requires diagnostics to be run first."))),
+          actionButton("RemoveDuplicates", "Remove Duplicates from G", icon=icon("user-times"), class="btn btn-danger"),
+          tags$br(), tags$br(),
+          downloadButton("DownloadGdedup", "Download Deduplicated G"),
+          tags$hr(),
+          tags$h5(tags$strong("Fine-tune G Matrix")),
+          selectInput("kinTuneMethod", "Tuning Method",
+                      choices = c("None"="none","Blend"="blend","Bend"="bend"),
+                      selected = "none"),
+          conditionalPanel(
+            condition = "input.kinTuneMethod == 'blend'",
+            numericInput("kinPblend", "Blend Proportion (pblend)", value=0.05, min=0.001, max=0.5, step=0.005)
+          ),
+          actionButton("RunKinTune", "Fine-tune G", icon=icon("sliders-h"), class="btn btn-warning"),
+          tags$br(), tags$br(),
+          downloadButton("DownloadGtuned", "Download Tuned G"),
+          tags$hr(),
+          tags$h5(tags$strong("Kinship Heatmap")),
+          actionButton("RunKinHeatmap", "Generate Heatmap", icon=icon("th-large"), class="btn btn-info"),
+          tags$hr(),
+          tags$h5(tags$strong("Kinship PCA")),
+          numericInput("kinNcp", "Number of PCs", value=20, min=2, max=50),
+          actionButton("RunKinPCA", "Run Kinship PCA", icon=icon("chart-area"), class="btn btn-success")
+        )
+      ),
+      column(8,
+        box(width=12, title="Kinship Diagnostics (Original G)", solidHeader=TRUE, status="info",
+            collapsible=TRUE, collapsed=FALSE,
+          verbatimTextOutput("kinDiagMsg"),
+          fluidRow(
+            column(6, plotOutput("kinDiagPlot",    height="300px")),
+            column(6, plotOutput("kinOffdiagPlot", height="300px"))
+          ),
+          conditionalPanel(
+            condition = "output.kinHasDuplicates",
+            tags$hr(),
+            tags$strong("Duplicate Pairs Detected:"),
+            tableOutput("kinDupTable")
+          )
+        ),
+        box(width=12, title="Duplicate Removal Results", solidHeader=TRUE, status="danger",
+            collapsible=TRUE, collapsed=TRUE,
+          verbatimTextOutput("kinDedupMsg")
+        ),
+        box(width=12, title="Fine-tuned G Diagnostics", solidHeader=TRUE, status="warning",
+            collapsible=TRUE, collapsed=TRUE,
+          verbatimTextOutput("kinTuneMsg"),
+          fluidRow(
+            column(6, plotOutput("kinTuneDiagPlot",    height="300px")),
+            column(6, plotOutput("kinTuneOffdiagPlot", height="300px"))
+          )
+        ),
+        box(width=12, title="Kinship Heatmap", solidHeader=TRUE, status="info",
+            collapsible=TRUE, collapsed=TRUE,
+          plotOutput("kinHeatmap", height="500px")
+        ),
+        box(width=12, title="Kinship PCA", solidHeader=TRUE, status="success",
+            collapsible=TRUE, collapsed=FALSE,
+          tabsetPanel(
+            tabPanel("Scree Plot", plotOutput("kinPCAScree", height="400px")),
+            tabPanel("PC Plot",    plotOutput("kinPCAPlot",  height="400px"))
+          )
+        )
+      )
+    )
+  ),
+
 		tabItem(
 		  tabName = "phenotypic_data",
 		        fluidRow(
@@ -768,18 +1036,34 @@ app_ui <- function(request){
 		     )
 		),
 		
-### MTCV		
+### MTCV
 		  tabItem(
 		   tabName="MTCV",
 		   fluidRow(
-		     column(4, 
+		     column(4,
 		            box(width=12,title="Multitrait CV Parameters",solidHeader=TRUE,status="primary",
   		            numericInput(inputId="k",label = "Enter k for k-fold cross validation",value=2,min=2,max=10),
   		            numericInput(inputId="nIter",label = "Enter n for n-iterations of each cycle of cross validation",value=2,min=2,max=10),
   		            tags$br(),
+  		            selectInput(inputId="mtCVKinSource",
+  		                        label="Kinship Matrix for Kernel Models (RKHS / GBLUP)",
+  		                        choices=c("Compute via rrBLUP (A.mat)"="amat",
+  		                                  "Use G Matrix from Kinship Tab"="gmat"),
+  		                        selected="amat"),
+  		            tags$small(tags$em("'G Matrix' uses the tuned G if available, otherwise the raw G from the Genomic Kinship tab.")),
+  		            tags$br(),
   		            tags$br(),
   		            actionButton("CrossValidationMT", "Run CV for MT Models"),
-  		            tags$br()  
+  		            tags$br()
+		            ),
+		            box(width=12, title="Bayesian MCMC Parameters (BGLR models only)",
+		                solidHeader=TRUE, status="primary", collapsible=TRUE, collapsed=TRUE,
+		                numericInput(inputId="b_Iter_MTCV",  label="Enter No. of iterations",        value=5000, min=1000, max=100000),
+		                numericInput(inputId="b_Burnin_MTCV",label="Enter No. of burnin iterations", value=1000, min=100,  max=50000),
+		                numericInput(inputId="b_Thin_MTCV",  label="Thinning length",                value=10,   min=1,    max=100),
+		                numericInput(inputId="b_R2_MTCV",    label="R2 - Prior proportion of variance due to genetic effects", value=0.5, min=0, max=1),
+		                numericInput(inputId="b_Digits_MTCV",label="No. of digits",                  value=4,    min=0,    max=10),
+		                tags$br()
 		            )
 		     ),
 		     column(8, 
@@ -889,11 +1173,21 @@ app_ui <- function(request){
 		                 tags$br(),
 		                 actionButton("CrossValidationME", "Run CV for ME GP Models"),
 		                 tags$br()
-		                 
-		             )     
-		    
+
+		             ),
+		             tags$br(),
+		             box(width=12,title="Bayesian MCMC Parameters",solidHeader=TRUE,status="primary",collapsible=TRUE,collapsed=TRUE,
+		                 numericInput(inputId="b_Iter_MECV",  label="Enter No. of iterations ",  value=10000,min=1000,max=100000),
+		                 numericInput(inputId="b_Burnin_MECV",label="Enter No. of burnin iterations",value=2000,min=100,max=50000),
+		                 numericInput(inputId="b_Thin_MECV",  label="Thinning length",           value=10,   min=1,  max=100),
+		                 numericInput(inputId="b_Tol_MECV",   label="Tolerance level for eigen value filtering",value=1e-10,min=1e-20,max=1),
+		                 numericInput(inputId="b_R2_MECV",    label="R2 - Proportion of variance",value=0.5,  min=0,  max=1),
+		                 numericInput(inputId="b_Digits_MECV",label="No. of digits",             value=4,    min=0,  max=10),
+		                 tags$br()
+		             )
+
 		  ),
-      column(8, 
+      column(8,
              box(width=12,title="Cross Validation of Multi-environment GP Models",solidHeader=TRUE,status="primary",
              
                tags$h4("Perform crossvalidation for multi-environmental models to identify the model 
@@ -1084,6 +1378,13 @@ app_ui <- function(request){
   		        tags$br(),
   		        tags$br(),
   		        selectInput(inputId="GPModelMT","Choose Prediction Model for Multiple Traits",c("BRR (BGLR)","RKHS (BGLR)","Spike-Slab(BGLR)","Mmer (Sommer)")),
+  		        selectInput(inputId="mtGPKinSource",
+  		                    label="Kinship Matrix for Kernel Models (RKHS / GBLUP)",
+  		                    choices=c("Compute via rrBLUP (A.mat)"="amat",
+  		                              "Use G Matrix from Kinship Tab"="gmat"),
+  		                    selected="amat"),
+  		        tags$small(tags$em("'G Matrix' uses the tuned G if available, otherwise the raw G from the Genomic Kinship tab.")),
+  		        tags$br(),
   		        actionButton("RunPredictionsMT", "Predict Multiple Traits!"),
   		        tags$br(),
   		        tags$br(),
@@ -1092,6 +1393,15 @@ app_ui <- function(request){
   		        tags$br(),
   		        tags$br(),
   		        downloadButton("ExportOutMT", "Export Output Table")
+		        ),
+		        box(width=12, title="Bayesian MCMC Parameters (BGLR models only)",
+		            solidHeader=T, status="primary", collapsible=TRUE, collapsed=TRUE,
+		            numericInput(inputId="b_Iter_MTGP",  label="Enter No. of iterations",        value=5000, min=1000, max=100000),
+		            numericInput(inputId="b_Burnin_MTGP",label="Enter No. of burnin iterations", value=1000, min=100,  max=50000),
+		            numericInput(inputId="b_Thin_MTGP",  label="Thinning length",                value=10,   min=1,    max=100),
+		            numericInput(inputId="b_R2_MTGP",    label="R2 - Prior proportion of variance due to genetic effects", value=0.5, min=0, max=1),
+		            numericInput(inputId="b_Digits_MTGP",label="No. of digits",                  value=4,    min=0,    max=10),
+		            tags$br()
 		        )
 		  ),
 		  column(8,
@@ -1174,49 +1484,80 @@ app_ui <- function(request){
 		  tabName="MEGP",
 		  fluidRow(
 		    column(4,
-		           box(width=12,title="Multi-environmental GP Parameters",solidHeader=T,status="primary",
-		               
-		            selectInput(inputId="Package","Choose Package for MultiEnvironment GP Modeling ",c("BGGE-EnvRType")),
-		            conditionalPanel(condition="input.Package == 'BGGE-EnvRType'",
-		                  selectInput(inputId="GKernelMet","Choose Genotype Kernel Method",c("Linear","Gaussian"),selected="Linear",multiple=FALSE),
-		                  tags$br(),
-		                  checkboxInput("fitEnvCov", "Include Enviromics Kernel from Step 2", FALSE),
-		                  
+		         box(width=12,title="Multi-environmental GP Parameters",solidHeader=T,status="primary",
+		
+					selectInput(inputId="Package","Choose Package for MultiEnvironment GP Modeling ",c("BGGE")),
+					conditionalPanel(condition="input.Package == 'BGGE'",
+						selectInput(inputId="GKernelMet_MEGP","Choose Genomic Kinship Kernel Method",c("Linear","Gaussian"),selected="Linear",multiple=FALSE),
+						tags$br(),
+						checkboxInput("fitEnvCov_MEGP", "Include Enviromics Kernel from Step 3", FALSE),
+						tags$br(),
+						checkboxInput("reaction_MEGP", "Include Reaction Norm and Enviromics Kernel ", FALSE),
+						tags$br() 	
 		            ),
-		            tags$br(),
-		           ),
-		           box(width=12,title="Subset Data",solidHeader=T,status="primary",collapsible = TRUE,collapsed = TRUE,
-		             selectInput(inputId="YearME","Select Year/Years",choices="All",selected="All",multiple=TRUE),
-		             selectInput(inputId="LocationME","Select Location/Locations",choices="All",selected="All",multiple=TRUE),
-		           ),
-		           tags$br(),
-		           box(width=12,title="Choose Covariates",solidHeader=T,status="primary",collapsible = TRUE,collapsed = TRUE,
-		               selectInput(inputId = "EnvVarID", "Environmental Factor", choices = NULL, multiple = FALSE),
-		               selectInput(inputId = "fixedME", "Fixed Effect", choices = NULL, multiple = FALSE),
-		           ),
-		           tags$br(),
-		           box(width=12,title="Fit ME Model",solidHeader=T,status="primary",collapsible = FALSE,collapsed = FALSE,
+		            tags$br()
+					#checkboxInput("exportMECVParams", "Export ME Cross validation parameters", FALSE)
+		          ),
+				
+		          box(width=12,title="Subset Data",solidHeader=T,status="primary",collapsible = TRUE,collapsed = TRUE,
+		             selectInput(inputId="YearMEGP","Select Year/Years",choices="All",selected="All",multiple=TRUE),
+		             selectInput(inputId="LocationMEGP","Select Location/Locations",choices="All",selected="All",multiple=TRUE)
+		          ),
+		          tags$br(),
+		          box(width=12,title="Choose Covariates",solidHeader=T,status="primary",collapsible = TRUE,collapsed = TRUE,
+		              selectInput(inputId = "EnvVarID_MEGP", "Environmental Factor", choices = NULL, multiple = FALSE),
+		              selectInput(inputId = "fixed_MEGP", "Fixed Effect", choices = NULL, multiple = FALSE)
+		          ),
+				  				
+				  tags$br(),
+		          box(width=12,title="Mask Target Set",solidHeader=T,status="primary",collapsible = TRUE,collapsed = TRUE,
+		              selectInput(inputId = "mskFactrVar", "Factor to Mask", choices = NULL, multiple = FALSE),
+		              selectInput(inputId = "mskFactrLev", "Masked Factor Level", choices = NULL, multiple = FALSE),
+					  numericInput(inputId = "mskProp", "Masking Proportion",value=1,min=0,max=1),
+					  numericInput(inputId = "nMskSampReps", "No.of.Sampling Replicates",value=1,min=1,max=100)
+				  ),
+				
+				  tags$br(),
+		          box(width=12,title="Kernel Parameters",solidHeader=T,status="primary",collapsible = TRUE,collapsed = TRUE,
+		              selectInput(inputId="dimn_KE_MEGP","KE_Dim",choices=c(NULL,"q","n"),selected=NULL,multiple=FALSE),
+					  numericInput(inputId = "bandWidth_MEGP", "Bandwidth for Gaussian Kernel", value=1,min=0,max=1),
+		              numericInput(inputId = "quantile_MEGP", "Quantile for Gaussian Kernel", value=0.5,min=0,max=1)
+				  ),
+				
+				  tags$br(),
+		          box(width=12,title="Bayesian MCMC Parameters",solidHeader=T,status="primary",collapsible = TRUE,collapsed = TRUE,	
+                       numericInput(inputId="b_Iter_MEGP",label = "Enter No. of iterations ",value=10000,min=1000,max=100000),
+		               numericInput(inputId="b_Burnin_MEGP",label = "Enter No. of burnin iterations",value=2000,min=100,max=50000),
+		               numericInput(inputId="b_Thin_MEGP",label = "Thinning length",value=10,min=1,max=100),
+					   numericInput(inputId="b_Tol_MEGP",label = "Tolerance level for eigen value filtering",value=1e-10,min=1e-20,max=1),
+					   numericInput(inputId="b_R2_MEGP",label = "R2 - Proportion of variance",value=0.5,min=0,max=1),
+					   numericInput(inputId="b_Digits_MEGP",label = "No. of digits",value=4,min=0,max=10),
+					   tags$br()
+				  ),
+				
+		          tags$br(),
+		          box(width=12,title="Fit ME Model",solidHeader=T,status="primary",collapsible = FALSE,collapsed = FALSE,
+				
 		              actionButton("RunPredictionsME", "Fit Multi-environmental Model!"),
-		           tags$br(),
-		           ),
-		           box(width=12,title="View Output Table",solidHeader=T,status="primary",collapsible = TRUE,collapsed = TRUE,
-		               #tags$h5(tags$strong("View Output Table from Model")),
-		               conditionalPanel(condition="input.fitEnvCov == false",
+					  tags$br()
+		          ),
+		          box(width=12,title="View Output Table",solidHeader=T,status="primary",collapsible = TRUE,collapsed = TRUE,
+		               conditionalPanel(condition="input.fitEnvCov_MEGP == false",
 		                                selectInput(inputId="MEModelEnvR","Choose ME Model ",c("Main Effect (G+E)","Homogeneous Variance (G+E+GxE)","Heterogeneous Variance (G+E+GxEi)"),selected = "Main Effect (G+E)",multiple = FALSE)
 		               ),
-		               conditionalPanel(condition="input.fitEnvCov == true",
+		               conditionalPanel(condition="input.fitEnvCov_MEGP == true",
 		                                selectInput(inputId="MEModelEnvR","Choose ME Model ",c("Main Effect (G+E+W)","Homogeneous Variance (G+E+GxE+W)","Heterogeneous Variance (G+E+GxEi+W)"),selected = "Main Effect (G+E+W)",multiple = FALSE)
 		               ),
 		             tags$br(),
 		             downloadButton("ExportOutME", "Export Predictions Table")
-		           )
+		          )
 		    ),
 		    column(8,
 		           box(width=12,title="Multi-environment Genomic Prediction",solidHeader=T,status="primary",
 		               tags$h4("Environments are defined as combinations of year and locations in which phenotypic data are collected.
-                              Multi-environmental models are implemented using the EnvRType/BGGE pipeline as well as 'mmer' function in 'sommer' package.
+                              Multi-environmental models are implemented using the BGGE/BGLR methods in the backend.
                               Fit genomic prediction models taking into account only the main effects or the main effects + GxE effects.
-                              The user needs to select one or many years and locations and the type of variance-covariance structure for fitting the model"
+                              The user needs to select one or many years and locations"
 		               ),
 		               tags$br(),
 		               tags$br(),
@@ -1239,16 +1580,16 @@ app_ui <- function(request){
 		               fluidRow(
 		                 column(2),column(width=8,tags$h5(tags$strong(textOutput("MssgMEGP"))))),
 		               tags$br(),
-		             
+		
 		               tags$head(
 		                 tags$style(HTML("
                                       #messageMEGPRun{
-                                        
+
                                                       /*max-height: 1200px; Set maximum height */
                                                       overflow-y: scroll; /* Enable vertical scrolling */
                                                       overflow-x: scroll;  /*Hide horizontal scrolling */
                                                       overflow-wrap: anywhere; /* Ensure long words do not cause horizontal scrolling */
-                                                      width: 600px; 
+                                                      width: 600px;
                                                       /*max-width: 100%; */
                                                       padding: 6px 12px;
                                                       height: 150px;
@@ -1263,22 +1604,25 @@ app_ui <- function(request){
 		                )
 		           ),
 		               tags$br(),
-		               tabBox(
-		                 title = "Multi-environmental GP Table ",
+		            tabBox(
+		                 title = "ME GP Output ",
 		                 side = "left",
-		                 width = 12,  # Adjust as needed
+		                 width = 12,
 		                 tabPanel(
 		                   "Table View",
 		                   div(
 		                     tableOutput("Ranked_Lines_for_SelectionSTME"),
-		                     style = "overflow-x: auto; width: 100%;"  # Prevents horizontal scrolling issues
+		                     style = "overflow-x: auto; width: 100%;"
 		                   )
-		                 )
-		               )
+		                 ),
+					 tabPanel(
+      		                "ME GP Output Plots",
+      		                uiOutput("MEPlotsUI")
+      		             )					
+		            )
 		        )
 		     )
-		  )
-	 		   #FR            
+		  )	 		   #FR            
     	)
 	 )
 		  

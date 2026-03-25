@@ -16,6 +16,7 @@
 #' # Example usage of getemCVR
 #' result <- getemCVR(...)
 #' }
+#' @export
 getemCVR <- function(Data_Table_Num_Filt_List,trait,nTraits,k,nIter){
   
      TrainData_Table_Num_Filt <- Data_Table_Num_Filt_List[[1]]
@@ -72,6 +73,7 @@ getemCVR <- function(Data_Table_Num_Filt_List,trait,nTraits,k,nIter){
 #' # Example usage of getRankedPredictedValues
 #' result <- getRankedPredictedValues(...)
 #' }
+#' @export
 getRankedPredictedValues <- function(Data_Table_Num_Filt_List,nTraits,trait,GPModel,fixedX=NULL,fixedData=NULL,optTS=NULL){ 
     
      if(!is.null(fixedX) & fixedX != "NULL" & fixedData !="NULL"){ 

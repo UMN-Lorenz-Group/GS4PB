@@ -27,19 +27,23 @@ getOptimalTS(
 \item{nTrainToSelect}{An integer specifying the number of training samples to select optimally.}
 
 \item{GAParameters}{A list containing parameters for the genetic algorithm:
-- `errorstat`: A single or multiple error statistics to optimize.
-- `InitPop`: Initial population for the GA.
-- `npop`: Number of individuals in the population.
-- `nelite`: Number of elite individuals to retain.
-- `mutprob`: Mutation probability.
+- `errorstat`: A single error statistic (ST) or character vector of statistics (MO, length > 1).
+  Single-objective example: `"MSE"`. Multi-objective example: `c("PEVmean", "meanCD")`.
+- `selectionstatstypes`: *(MO only)* Character vector indicating whether each stat in
+  `errorstat` should be minimised (`"min"`) or maximised (`"max"`).
+  Defaults to `rep("min", length(errorstat))` when not supplied.
+- `plotdirections`: *(MO only)* Character vector of Pareto-front plot directions per stat.
+  Defaults to `rep("min", length(errorstat))` when not supplied.
+- `InitPop`: Initial population for the GA (NULL = random).
+- `npop`: Number of individuals in the GA population.
+- `mutprob`: Mutation probability (ST) / `npopGA` in MO.
 - `mutintensity`: Intensity of mutation.
-- `niterations`: Number of iterations for the GA.
-- `minitbefstop`: Minimum iterations before stopping.
-- `tabu`: Whether to use tabu search.
-- `tabumemsize`: Size of the tabu memory.
-- `plotiters`: Whether to plot iterations.
+- `niterations`: Number of GA iterations (`niterations` in ST; mapped to `nitGA` in MO).
+- `plotiters`: Whether to plot iteration progress.
 - `lambda`: Regularization parameter.
-- `mc.cores`: Number of cores for parallel execution.}
+- `mc.cores`: Number of cores for parallel execution.
+- `nelite`, `minitbefstop`, `tabu`, `tabumemsize`: Used only by the single-objective
+  `GenAlgForSubsetSelection` (ST path); ignored for multi-objective (MO path).}
 }
 \value{
 A list containing:
@@ -76,20 +80,36 @@ TestData <- data.frame(
 
 Data_Table_Num_Filt_List <- list(TrainData, TestData)
 
+# Single-objective (ST) — uses GenAlgForSubsetSelection
 GAParams <- list(
-  errorstat = "MSE",
-  InitPop = NULL,
-  npop = 50,
-  nelite = 5,
-  mutprob = 0.01,
+  errorstat    = "MSE",      # single stat → ST path
+  InitPop      = NULL,
+  npop         = 50,
+  nelite       = 5,          # ST only
+  mutprob      = 0.01,
   mutintensity = 1,
-  niterations = 100,
-  minitbefstop = 10,
-  tabu = FALSE,
-  tabumemsize = 5,
-  plotiters = TRUE,
-  lambda = 0.5,
-  mc.cores = 2
+  niterations  = 100,        # mapped to niterations (ST) / nitGA (MO)
+  minitbefstop = 10,         # ST only
+  tabu         = FALSE,      # ST only
+  tabumemsize  = 5,          # ST only
+  plotiters    = TRUE,
+  lambda       = 0.5,
+  mc.cores     = 2
+)
+
+# Multi-objective (MO) — uses GenAlgForSubsetSelectionMO
+GAParams_MO <- list(
+  errorstat           = c("PEVmean", "meanCD"),  # length > 1 → MO path
+  selectionstatstypes = c("min", "min"),          # minimise both
+  plotdirections      = c("min", "min"),
+  InitPop             = NULL,
+  npop                = 50,
+  mutprob             = 0.8,
+  mutintensity        = 1,
+  niterations         = 500,
+  plotiters           = FALSE,
+  lambda              = 1e-6,
+  mc.cores            = 2
 )
 
 # Generate an optimal training subset

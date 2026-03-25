@@ -1,0 +1,23 @@
+#!/bin/sh
+##  GS4PB post-commit hook — installed by inst/sync/install_hooks.R
+##
+##  Runs after every commit to the GS4PB package repo and reminds the
+##  developer to sync changed pipeline functions back to the app monoliths.
+
+changed=$(git diff-tree --no-commit-id -r --name-only HEAD | grep "^R/")
+
+if [ -n "$changed" ]; then
+  echo ""
+  echo "  ┌─────────────────────────────────────────────────────────────────┐"
+  echo "  │  GS4PB: R/ files changed in this commit.                       │"
+  echo "  │  If you edited pipeline functions, sync them to the app repos:  │"
+  echo "  │                                                                 │"
+  echo "  │  Rscript inst/sync/sync_app_to_pkg.R \\                         │"
+  echo "  │    --app <path/to/GS_Pipeline_Jan_2026_FnsApp.R> \\             │"
+  echo "  │    --pkg . --rebuild                                            │"
+  echo "  │                                                                 │"
+  echo "  │  NOTE: sync direction is App → Pkg (not Pkg → App).            │"
+  echo "  │  Edit functions in the app, then run the above to update pkg.   │"
+  echo "  └─────────────────────────────────────────────────────────────────┘"
+  echo ""
+fi

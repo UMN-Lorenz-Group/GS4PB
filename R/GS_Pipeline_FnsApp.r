@@ -12,31 +12,35 @@
 #' @examples
 #' \dontrun{
 #' # Example usage of VCFtoDF
-#' result <- VCFtoDF(...) 
+#' result <- VCFtoDF(...)
 #' }
-
+#' @export
 VCFtoDF <- function(infile){
-  
+
   vcf <- read.vcfR(infile, verbose = FALSE)
   gt <- extract.gt(vcf, element = "GT", as.numeric = F)
   fix_T <- as_tibble(getFIX(vcf))
-  
+
   gt2 <- matrix(0, ncol = ncol(gt), nrow = nrow(gt))
   colnames(gt2) <- colnames(gt)
-  
+
   gt2a <- apply(gt,2, function(x) gsub("1/1","BB",x))
   gt2b <- gsub("0[/|]0","AA",gt2a)
   gt2c <- gsub("[10][/|][10]","AB",gt2b)
   gt2d <- gsub("\\.[/|]\\.","NA",gt2c)
-  
-    
+
+  # gt2[(gt == "1/1")|(gt == "1|1")] <- 'BB'
+  # gt2[(gt == "0/0")|(gt == "0|0")] <- 'AA'
+  # gt2[(gt == "0/1")|(gt == "1/0")|(gt == "0|1")|(gt == "1|0")] <- 'AB'
+  # gt2[(gt == "\\./\\.")|(gt == "\\.|\\.")] <- NA
+
   gt2 <- as_tibble(gt2d) %>%
     mutate(SNPID = fix_T$ID)
-  
-  gt.simple <- fix_T %>% select("ID", "CHROM", POS, REF, ALT) %>%
-    rename(SNPID=ID, Chrom=CHROM, Position=POS) %>%
-    left_join(gt2, by = 'SNPID')
-  
+
+  gt.simple <- fix_T %>% dplyr::select("ID", "CHROM", POS, REF, ALT) %>%
+    dplyr::rename(SNPID=ID, Chrom=CHROM, Position=POS) %>%
+    dplyr::left_join(gt2, by = 'SNPID')
+
   return(gt.simple)
 }
  
@@ -479,7 +483,7 @@ getMergedData <- function(gt2d, Pheno, testIDs){
 #' # Example usage of getProcessedData
 #' result <- getProcessedData(...)
 #' }
-
+#' @export
 getProcessedData <- function(Data_Table_Num_List,trait){
 
      TrainData_Table_Num <- Data_Table_Num_List[[1]]
@@ -529,6 +533,7 @@ getProcessedData <- function(Data_Table_Num_List,trait){
 #' # Example usage of getTasObj
 #' result <- getTasObj(...)
 #' }
+#' @export
 getTasObj <- function(infileVCF){
     tasGeno <- rTASSEL::readGenotypeTableFromPath(
 		path = infileVCF,
@@ -553,7 +558,7 @@ getTasObj <- function(infileVCF){
 #' # Example usage of getFilteredSitesGenoData
 #' result <- getFilteredSitesGenoData(...)
 #' }
-
+#' @export
 getFilteredSitesGenoData <- function(tasGeno,siteMinCnt,MAF){
    
 	tasGenoFilt <- rTASSEL::filterGenotypeTableSites(
@@ -583,6 +588,7 @@ getFilteredSitesGenoData <- function(tasGeno,siteMinCnt,MAF){
 #' # Example usage of getFilteredTaxaGenoData
 #' result <- getFilteredTaxaGenoData(...)
 #' }
+#' @export
 getFilteredTaxaGenoData <- function(tasGeno,MinNotMissing){
 
    	
@@ -656,7 +662,7 @@ getGenoTas_to_DF_Old <- function(tasGeno){
 #' # Example usage of getGenoTas_to_DF
 #' result <- getGenoTas_to_DF(...)
 #' }
-
+#' @export
 getGenoTas_to_DF <- function(tasGeno){
 
     tasGenoMat <- as.matrix(tasGeno)
@@ -698,6 +704,7 @@ getGenoTas_to_DF <- function(tasGeno){
 #' # Example usage of getPredictionData
 #' result <- getPredictionData(...)
 #' }
+#' @export
 getPredictionData <- function(Data_Table_Num_List,noCandidates){
 
      TrainData_Table_Num_Filt <- Data_Table_Num_List[[1]]
@@ -734,7 +741,7 @@ getPredictionData <- function(Data_Table_Num_List,noCandidates){
 #' # Example usage of getLibStats
 #' result <- getLibStats(...)
 #' }
-
+#' @export
 getLibStats <- function(buildLib){
     
     nInd <- nrow(buildLib)/2
@@ -884,6 +891,7 @@ getFixedData_List <- function(Processed_Data_Table_Num_Split_Filt,trait,fixedCoV
 #' # Example usage of getPhenoMEData
 #' result <- getPhenoMEData(...)
 #' }
+#' @export
 getPhenoMEData <- function(PhenoME,TraitME,nSelTraits,IDColsME,StrainME){
 
    print("Get Pheno ME Data")
@@ -956,6 +964,7 @@ getPhenoMEData <- function(PhenoME,TraitME,nSelTraits,IDColsME,StrainME){
 #' # Example usage of getMergedDataME
 #' result <- getMergedDataME(...)
 #' }
+#' @export
 getMergedDataME <- function(phData,genoImp,TargetIDs){
 
  print("MergingData")
@@ -977,7 +986,7 @@ getMergedDataME <- function(phData,genoImp,TargetIDs){
 	  phData <- Ph_Mat_list[[nTrt]]
 	  
 	  rmID <- which(colnames(genoImp) %in% c("SNPID","Chrom","Position","REF","ALT"))
-	  genoImpDF <- as.data.frame(t(genoImp[,-c(1:5)]))
+	  genoImpDF <- as.data.frame(t(genoImp[,-rmID]))
 	  colnames(genoImpDF) <- paste("ss",as.vector(as.data.frame(genoImp)[,"SNPID"]),sep="-")
 	  
 	  ### Merge Data
@@ -987,13 +996,11 @@ getMergedDataME <- function(phData,genoImp,TargetIDs){
 	 
 	 
 	  #### GenoData
-	  genoCols <- grep("ss",colnames(Data))
+	  genoCols <- grep("^ss",colnames(Data))
 	  genoDat <- as.matrix(apply(Data[,genoCols],2,as.numeric))
 	  rownames(genoDat) <- Data[,1]
 	  is.matrix(genoDat)
-	  
-	  anyNA(genoDat)
-	  table(genoDat)
+
 	  genoDat_List[[nTrt]] <- genoDat
 	  
 	  #### PhenoData
@@ -1090,40 +1097,44 @@ getMergedDataME <- function(phData,genoImp,TargetIDs){
 #' result <- getPhenoDistbnPlots(...)
 #' }
 
-getPhenoDistbnPlots <- function(DT_1_Filt_List,TraitME,nTrt,outDirPath){
+getPhenoDistbnPlots <- function(DT_1_Filt_List,TraitME,nTrt,EnvVar,outDirPath){
 
-###### Distribution of Trait BLUEs & BLUPs across locations 
-     
+###### Distribution of Trait BLUEs & BLUPs across locations
+
     DT_1_Filt <- DT_1_Filt_List[[nTrt]]
 	trait <- TraitME
 #### Trait BLUPs
- 
-		 
-	DT_2B <- DT_1_Filt
-	DT_2B$Loc <- as.factor(DT_2B$Loc)
-	  
-	table(DT_2B$Loc)
-	
+
+	 DT_2B <- DT_1_Filt
+	 envColInd <- which(colnames(DT_2B) %in% "Env")
+	 colnames(DT_2B)[envColInd] <- "EnvVar"
+
+	#DT_2B <- DT_1_Filt %>% rename(EnvVar = Env)
+	DT_2B$EnvVar <- as.factor(DT_2B$EnvVar)
+
+	print(table(DT_2B$EnvVar))
+
 	nanInd <-   which(is.na(DT_2B[,trait]) | is.nan(DT_2B[,trait]))
 	if(length(nanInd)>0){DT_2B <- DT_2B[-nanInd,]}
-	
+
 	minY <- min(DT_2B[,trait])-4
 	maxY <- max(DT_2B[,trait])+4
-	  
-	plot3 <- ggplot2::ggplot(DT_2B, aes(x = Loc, y = base::get(trait),fill=Loc)) +
+
+	plot3 <- ggplot2::ggplot(DT_2B, aes(x = EnvVar, y = get(trait),fill=EnvVar)) +
 		geom_boxplot(position = position_dodge(width = 0.8), color = "black") +
-		labs(x = "Location", y = gsub("_"," ",trait))+
+		labs(x = "Environment", y = gsub("_"," ",trait))+
 		#scale_fill_manual(values = c("North" = "gray","Central"="blue", "South" = "red")) +
 		theme_minimal() +
-		theme(axis.text.x = element_text(size=26,angle = 45, hjust = 1,face="bold",color = "black"),
-			  axis.text.y= element_text(size=26,face="bold",color="black"),
+		theme(axis.text.x = element_text(size=20,angle = 45, hjust = 1,face="bold",color = "black"),
+			  axis.text.y= element_text(size=20,face="bold",color="black"),
 			  panel.grid = element_blank(),
 			  panel.grid.major = element_blank(),
 			  panel.grid.minor = element_blank(),
-			  axis.title.y = element_text(size = 26, face = "bold"),
-			  axis.title.x = element_text(size = 26, face = "bold"),
-			  legend.title = element_text(size = 26, face = "bold"),
-			  legend.text = element_text(size = 26, face = "bold"))
+			  axis.title.y = element_text(size = 22, face = "bold"),
+			  axis.title.x = element_text(size = 22, face = "bold"),
+			  legend.position = "none",
+			  legend.title = element_blank(), #text(size = 26, face = "bold"),
+			  legend.text = element_blank()) #(size = 26, face = "bold"))
 
      if(is.null(outDirPath) || outDirPath==""){
 	   oFN <- paste(trait," Distribution.png",sep="")
@@ -1170,6 +1181,7 @@ getPhenoDistbnPlots <- function(DT_1_Filt_List,TraitME,nTrt,outDirPath){
 #' # Example usage of writeCVOutTable
 #' result <- writeCVOutTable(...)
 #' }
+#' @export
 writeCVOutTable <- function(CVROut,type,outDirPath){
     
     if(type=="ST"){
@@ -1199,6 +1211,7 @@ writeCVOutTable <- function(CVROut,type,outDirPath){
 #' # Example usage of writeGPOutTable
 #' result <- writeGPOutTable(...)
 #' }
+#' @export
 writeGPOutTable <- function(GPOut,type,outDirPath){
     
     if(type=="ST"){
@@ -1238,63 +1251,151 @@ writeGPOutTable <- function(GPOut,type,outDirPath){
 #' # Example usage of getCombinedTab
 #' result <- getCombinedTab(...)
 #' }
-getCombinedTab <- function(outputListME,TraitME,IDColsME,IDColME,fitEnvCov){
+getCombinedTab <- function(outputListME, TraitME, IDColsME, IDColME,envVar,fitEnvCov,reaction) {
 
- if(fitEnvCov==FALSE){
-  Models <- c("MM","MDs","MDe")
- }else if(fitEnvCov == TRUE){
-  Models <- c("EMM","EMDs","EMDe")
- }
-  nTraits <- length(TraitME)
-  
-  for(nTrt in 1:nTraits){
-  
-    Pred_Out <- outputListME[[nTrt]]
-	traitME <- TraitME[nTrt]
-    Fit_Pred <- Pred_Out[[3]]
-    nMod <- length(Fit_Pred)
-	
-    for(nM in 1:nMod){
-	 if(nM==1){
-	    Fit_Out <- Fit_Pred[[nM]]
-		uniqIDCol <- which(colnames(Fit_Out) == IDColME)
-		colnames(Fit_Out)[uniqIDCol] <- "UniqID"
-		colnames(Fit_Out) <- gsub("Obs",paste("Obs",Models[nM],sep="-"),colnames(Fit_Out))
-		colnames(Fit_Out) <- gsub("Pred",paste("Pred",Models[nM],sep="-"),colnames(Fit_Out))
-	 }else if(nM>1){ 
-	 
-	    Fit_Pred_Tab <- Fit_Pred[[nM]]
-		uniqIDCol <- which(colnames(Fit_Pred_Tab) == IDColME)
-		colnames(Fit_Pred_Tab)[uniqIDCol] <- "UniqID"
-		colnames(Fit_Pred_Tab) <- gsub("Obs",paste("Obs",Models[nM],sep="-"),colnames(Fit_Pred_Tab))
-		colnames(Fit_Pred_Tab) <- gsub("Pred",paste("Pred",Models[nM],sep="-"),colnames(Fit_Pred_Tab))
-		
-	    Fit_Out <- merge(Fit_Out,Fit_Pred_Tab,by="UniqID",all=TRUE)
-	 }
-	}
-	
-	if(nTrt ==1){
-	 colnames(Fit_Out) <- gsub("Obs",paste(traitME,"Obs",sep=""),colnames(Fit_Out))
-	 colnames(Fit_Out) <- gsub("Pred",paste(traitME,"Pred",sep=""),colnames(Fit_Out))
-	 Fit_Out_Tab <- Fit_Out
-	 
-	}else{
-	 colnames(Fit_Out) <- gsub("Obs",paste(traitME,"Obs",sep=""),colnames(Fit_Out))
-	 colnames(Fit_Out) <- gsub("Pred",paste(traitME,"Pred",sep=""),colnames(Fit_Out))
-	 Fit_Out_Tab <- merge(Fit_Out_Tab,Fit_Out,by="UniqID",all=TRUE) 
-	}
+  # 1) Model labels
+  if(fitEnvCov){ Models <-c("EMM","EMDs","EMDe")} else { Models <-c("MM","MDs","MDe")}
+  if(reaction){ Models <-  c("RN-MM","RN-MDs","RN-MDe")}
 
-    	
-   }
-   
-    valCols <- colnames(Fit_Out_Tab)[grep("Obs|Pred",colnames(Fit_Out_Tab))]
-	selOutCols <- c("UniqID",setdiff(IDColsME,IDColME),valCols)
-	Fit_Out_Tab_Sel <- Fit_Out_Tab[,selOutCols]
-   
-	
-	return(Fit_Out_Tab_Sel)
-	
+  Pred_Out <- outputListME$preds
+  nTraits  <- length(TraitME)
+
+  # Helper: ensure a column exists, else stop with message
+  .require_col <- function(df, col, who = "table") {
+    if (!col %in% names(df)) stop(sprintf("Column '%s' not found in %s.", col, who), call. = FALSE)
   }
+
+  # Helper: rename IDColME -> "UniqID" only if needed
+  .rename_to_uniqid <- function(df) {
+    if ("UniqID" %in% names(df)) return(df)
+    .require_col(df, IDColME, "prediction table")
+    names(df)[names(df) == IDColME] <- "UniqID"
+    df
+  }
+
+  # Helper: suffix Obs/Pred with model label
+  .tag_obs_pred <- function(df, label) {
+    nn <- names(df)
+    nn <- sub("^Obs$",  paste0("Obs-",  label), nn)
+    nn <- sub("^Pred$", paste0("Pred-", label), nn)
+    names(df) <- nn
+    df
+  }
+
+  # Helper: left merge by UniqID and coalesce duplicate ID columns
+  .safe_merge_by_uid <- function(x, y) {
+    x <- .rename_to_uniqid(x)
+    y <- .rename_to_uniqid(y)
+
+    keep_idcols <- setdiff(IDColsME, IDColME) # other ID columns we care about
+
+    out <- merge(x, y, by = "UniqID", all = TRUE, suffixes = c(".x", ".y"))
+
+	#out <- apply(out,2,as.character)
+
+    # Coalesce duplicated ID columns if present
+    for (cid in keep_idcols) {
+      cx <- paste0(cid, ".x")
+      cy <- paste0(cid, ".y")
+      if (cx %in% names(out) && cy %in% names(out)) {
+        # prefer non-NA from .x, else .y
+        out[[cid]] <- ifelse(!is.na(out[[cx]]), out[[cx]], out[[cy]])
+        out[[cx]] <- NULL
+        out[[cy]] <- NULL
+      }
+    }
+
+    # Also drop any leftover ".x"/".y" duplicates for columns that are exactly identical
+    dup_pairs <- grep("\\.(x|y)$", names(out), value = TRUE)
+    if (length(dup_pairs)) {
+      base_nms <- unique(sub("\\.(x|y)$", "", dup_pairs))
+      for (bn in base_nms) {
+        cx <- paste0(bn, ".x")
+        cy <- paste0(bn, ".y")
+        if (cx %in% names(out) && cy %in% names(out)) {
+          if (identical(out[[cx]], out[[cy]])) {
+            out[[bn]] <- out[[cx]]
+            out[[cx]] <- NULL
+            out[[cy]] <- NULL
+          }
+        }
+      }
+    }
+
+    out
+  }
+
+  Fit_Out_Tab <- NULL
+
+  for (nTrt in seq_len(nTraits)) {
+    traitME  <- TraitME[nTrt]
+    Fit_Pred <- Pred_Out[[nTrt]]
+
+    # 2) Guard: models vs provided tables
+    nMod <- length(Fit_Pred)
+    if (nMod == 0L) stop(sprintf("No prediction tables for trait '%s'.", traitME), call. = FALSE)
+    if (nMod != length(Models)) {
+      warning(sprintf("Trait '%s': number of model tables (%d) != length(Models) (%d). Will label by index.",
+                      traitME, nMod, length(Models)))
+    }
+
+    # Build per-trait combined table
+    Fit_Out <- NULL
+    for (nM in seq_len(nMod)) {
+      lab <- if (nM <= length(Models)) Models[nM] else paste0("M", nM)
+
+      tab <- Fit_Pred[[nM]]
+      if (!is.data.frame(tab)) stop(sprintf("Trait '%s' model %d is not a data.frame.", traitME, nM), call. = FALSE)
+      tab$Strain <- as.character(tab$Strain)
+	  tab$Env <- as.character(tab$Env)
+
+      tab <- .rename_to_uniqid(tab)
+      tab <- .tag_obs_pred(tab, lab)
+
+      if (is.null(Fit_Out)){
+        Fit_Out <- tab
+      } else {
+        Fit_Out <- .safe_merge_by_uid(Fit_Out, tab)
+      }
+    }
+
+    # Prefix Obs/Pred with trait name (as requested)
+    names(Fit_Out) <- sub("^Obs-",  paste0(traitME, "Obs-"),  names(Fit_Out))
+    names(Fit_Out) <- sub("^Pred-", paste0(traitME, "Pred-"), names(Fit_Out))
+
+    # Merge across traits (by UniqID)
+    if (is.null(Fit_Out_Tab)) {
+      Fit_Out_Tab <- Fit_Out
+    } else {
+      Fit_Out_Tab <- .safe_merge_by_uid(Fit_Out_Tab, Fit_Out)
+    }
+  }
+
+  envInd <- which(IDColsME %in% envVar)
+  IDColsME[envInd] <- "Env"
+
+  # 3) Final selection: ensure selOutCols all exist, else error
+  valCols   <- grep("Obs-|Pred-", names(Fit_Out_Tab), value = TRUE)
+  selOutCols <- c("UniqID", setdiff(IDColsME, IDColME), valCols)
+
+  missing_cols <- setdiff(selOutCols, names(Fit_Out_Tab))
+
+
+  if (length(missing_cols)) {
+
+	selOutFiltCols <- setdiff(selOutCols,missing_cols)
+	# stop(sprintf(
+      # "Cannot subset final table: the following columns are missing: %s\nAvailable columns: %s",
+      # paste(missing_cols, collapse = ", "),
+      # paste(names(Fit_Out_Tab), collapse = ", ")
+    # ), call. = FALSE)
+  }else{ selOutFiltCols <- selOutCols }
+  if(length(selOutFiltCols)){
+     Fit_Out_Tab_Sel <- Fit_Out_Tab[, selOutFiltCols, drop = FALSE]
+  }else {Fit_Out_Tab_Sel <- Fit_Out_Tab}
+
+  return(Fit_Out_Tab_Sel)
+}
 
 
 
@@ -1544,6 +1645,7 @@ getGenoDiff <- function(Geno1,Geno2){
 #' # Example usage of getGenoQCStats
 #' result <- getGenoQCStats(...)
 #' }
+#' @export
 getGenoQCStats <- function(GenoT){ 
  
   Geno <- GenoT[,-c(1:5)]
@@ -1581,6 +1683,7 @@ getGenoQCStats <- function(GenoT){
 #' # Example usage of getGenoQCStatsFilt1
 #' result <- getGenoQCStatsFilt1(...)
 #' }
+#' @export
 getGenoQCStatsFilt1 <- function(GenoT,GenoFilt1T,missSitesTH,MAFTH){ 
 
   Geno <- GenoT[,-c(1:5)]
@@ -1624,6 +1727,7 @@ getGenoQCStatsFilt1 <- function(GenoT,GenoFilt1T,missSitesTH,MAFTH){
 #' # Example usage of getGenoQCStatsFilt2
 #' result <- getGenoQCStatsFilt2(...)
 #' }
+#' @export
 getGenoQCStatsFilt2 <- function(GenoFilt1T,GenoFilt2T,missIndTH){ 
 
   GenoFilt1 <- GenoFilt1T[,-c(1:5)]
@@ -1699,6 +1803,1083 @@ getGenoImp1Stats <- function(Geno_DF,GenoImp_DF1){
 
   
   outMsg <- paste(breakLine0,genoLine,genoCodingLine,missScoresLines,breakLine1,breakLine2,genoLineI,genoCodingLineI,missScoresLinesI,filtLine,sep="")
- 
+
 }
-   
+
+####
+getModelPredictiveAbilityPlots <- function(outputListME,TraitME,IDColsME,IDColME,fitEnvCov,nModel,outDirPath){
+
+ print("PlotFnCall_In")
+ library(dplyr)
+ if(fitEnvCov==FALSE){
+  Models <- c("MM","MDs","MDe")
+ }else if(fitEnvCov == TRUE){
+  Models <- c("EMM","EMDs","EMDe")
+ }
+  nTraits <- length(TraitME)
+
+  nTrt <- 1
+  Pred_Out <- outputListME$preds
+  traitME <- TraitME[nTrt]
+  Fit_Pred <- Pred_Out[[nTrt]]
+  nMod <- length(Fit_Pred)
+  nM <- nModel
+
+  Fit_Out <- as.data.frame(Fit_Pred[[nM]])
+  uniqIDCol <- which(colnames(Fit_Out) == IDColME)
+  colnames(Fit_Out)[uniqIDCol] <- "UniqID"
+
+  print(paste("Plot_Fit_Out-",dim(Fit_Out)))
+  print(head(Fit_Out))
+
+  FitValues_Summary_DF <- Fit_Out %>% dplyr::group_by(Strain) %>% dplyr::summarise(AxLoc_Avg.Obs = mean(Obs,na.rm=TRUE),AxLoc_Avg.Pred = mean(Pred,na.rm=TRUE),.groups = "drop")
+  print(paste("Plot_DF_Dims-",dim(FitValues_Summary_DF)))
+  print(colnames(FitValues_Summary_DF))
+  print(head(FitValues_Summary_DF))
+
+  mainTitle <- paste(Models[nM]," Model Predictive Ability",sep="")
+
+  p <- plot_model_eval_strains_marginal(DF=FitValues_Summary_DF,
+									title_size = 18,
+									axis_title_size = 18,
+									axis_text_size = 14,
+									text_size = 5.0,
+									point_size= 6,
+									point_color = "red",
+									line_color = "blue",
+								    main_title =  mainTitle
+								)
+  OFN <- paste(outDirPath,"/",Models[nM],"_Model_PredAbility_PercentileGrid.png",sep="")
+  png(OFN,w=760, h=760, pointsize=20)
+  print(p)
+  Sys.sleep(5)
+  dev.off()
+  return(p)
+
+   }
+
+####
+### V4
+plot_model_eval_strains_marginal <- function(DF,
+                                             strain_col = Strain,
+                                             obs_col = AxLoc_Avg.Obs,
+                                             pred_col = AxLoc_Avg.Pred,
+                                             probs = c(0, 0.20, 0.50, 0.80, 1),
+                                             point_alpha = 0.5,
+                                             point_size = 4,
+                                             point_color = "black",
+                                             line_color = "red",
+                                             text_size = 4,
+                                             title_size = 16,
+										 main_title = "Model Predictive Ability" ,
+                                             axis_title_size = 14,
+                                             axis_text_size = 12) {
+  library(dplyr)
+  library(ggplot2)
+  library(grid)
+
+  # Rename columns
+  DF <- DF %>% dplyr::rename(
+      Strain = {{ strain_col }},
+      observed = {{ obs_col }},
+      predicted = {{ pred_col }}
+    )
+
+  # Percentile breaks
+  pred_breaks <- quantile(DF$predicted, probs = probs, na.rm = TRUE)
+  obs_breaks  <- quantile(DF$observed,  probs = probs, na.rm = TRUE)
+  labels <- paste0(100 * probs[-length(probs)], "-", 100 * probs[-1], "%")
+
+  # Bin assignment
+  DF <- DF %>%
+    dplyr::mutate(
+      pred_bin = cut(predicted, breaks = pred_breaks, include.lowest = TRUE, labels = labels),
+      obs_bin  = cut(observed,  breaks = obs_breaks, include.lowest = TRUE, labels = labels)
+    )
+
+  # Proportion within each pred_bin (conditional proportions)
+  DF_summary <- DF %>%
+    dplyr::group_by(pred_bin, obs_bin) %>%
+    dplyr::summarise(unique_strains = n_distinct(Strain), .groups = "drop") %>%
+    dplyr::group_by(pred_bin) %>%
+    dplyr::mutate(proportion = unique_strains / sum(unique_strains)) %>%
+    dplyr::ungroup()
+
+  # Midpoints for placing text
+  pred_mids <- sapply(1:(length(pred_breaks)-1), function(i) mean(pred_breaks[i:(i+1)]))
+  obs_mids  <- sapply(1:(length(obs_breaks)-1),  function(i) mean(obs_breaks[i:(i+1)]))+2
+
+  DF_summary <- DF_summary %>%
+    dplyr::mutate(
+      pred_mid = pred_mids[as.numeric(pred_bin)],
+      obs_mid  = obs_mids[as.numeric(obs_bin)],
+      x_min = pred_breaks[as.numeric(pred_bin)],
+      x_max = pred_breaks[as.numeric(pred_bin)+1],
+      y_min = obs_breaks[as.numeric(obs_bin)],
+      y_max = obs_breaks[as.numeric(obs_bin)+1]
+    )
+
+  # Global statistics
+  lm_fit <- lm(observed ~ predicted, data = DF)
+  mse <- mean((DF$observed - DF$predicted)^2,na.rm=TRUE)
+  cor_val <- cor(DF$predicted, DF$observed,use = "pairwise.complete")
+
+  stats_text <- paste0(
+    "Linear Fit: y = ", round(coef(lm_fit)[1], 2), " + ",
+    round(coef(lm_fit)[2], 2), "x\n",
+    "MSE = ", round(mse, 3), "\n",
+    "Correlation = ", round(cor_val, 3)
+  )
+
+  # Plot
+  p <- ggplot(DF, aes(x = predicted, y = observed)) +
+    geom_rect(data = DF_summary,
+              aes(xmin = x_min, xmax = x_max, ymin = y_min, ymax = y_max,
+                  fill = proportion),
+              inherit.aes = FALSE, alpha = 0.5) +
+    scale_fill_gradient(low = "white", high = "steelblue", name = "Proportion within \n Pred Bin") +
+    geom_point(alpha = point_alpha,size=point_size,color=point_color) +
+    geom_vline(xintercept = pred_breaks[c(1,2,4,5)], linetype = "dashed", color = "gray50") +
+    geom_vline(xintercept = pred_breaks[3], linetype = "solid", color = "black") +
+    geom_hline(yintercept = obs_breaks[c(1,2,4,5)], linetype = "dashed", color = "gray50") +
+    geom_hline(yintercept = obs_breaks[3], linetype = "solid", color = "black") +
+    geom_text(data = DF_summary,
+              aes(x = pred_mid, y = obs_mid,
+                  label = paste0(round(100 * proportion, 1), "%")),
+              color = "black", size = text_size, inherit.aes = FALSE) +
+    geom_smooth(method = "lm", color = line_color, se = FALSE) +
+	annotate("text",
+             x = min(DF$predicted) + 0.05 * diff(range(DF$predicted)),
+             y = max(DF$observed,na.rm=TRUE) - 0.05 * diff(range(DF$observed,na.rm=TRUE)),
+             label = stats_text, hjust = 0, vjust = 1, size = text_size, color = "black") +
+    annotate("text", x = pred_mids, y = min(DF$observed,na.rm=TRUE) - 0.15 * diff(range(DF$observed,na.rm=TRUE)),
+             label = labels, angle = 0, vjust = 1,size = text_size, fontface = "bold") +
+    annotate("text", y = obs_mids, x = min(DF$predicted) - 0.1 * diff(range(DF$predicted)),
+             label = labels, angle = 90, hjust = 1,size = text_size, fontface = "bold") +
+    labs(
+      title = main_title,
+      x = "Predicted Values (percentile bins)",
+      y = "Observed Values (percentile bins)"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = title_size, face = "bold"),
+      axis.title = element_text(size = axis_title_size, face = "bold"),
+      axis.text = element_text(size = axis_text_size),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+
+  return(p)
+}
+
+
+###########################################################################################
+## Part B: New functions added from GS_Pipeline_Jan_2026_FnsApp.R
+###########################################################################################
+
+
+VCFtoDF_V2<- function(infile){
+
+
+  vcf <- read.vcfR(infile, verbose = FALSE)
+  gt <- extract.gt(vcf, element = "GT", as.numeric = F,IDtoRowNames = FALSE)
+  fix_T <- as_tibble(getFIX(vcf))
+
+  gt2 <- matrix(0, ncol = ncol(gt), nrow = nrow(gt))
+  colnames(gt2) <- colnames(gt)
+
+  gt2a <- apply(gt,2, function(x) gsub("1/1","BB",x))
+  gt2b <- gsub("0[/|]0","AA",gt2a)
+  gt2c <- gsub("[10][/|][10]","AB",gt2b)
+  gt2d <- gsub("\\.[/|]\\.","NA",gt2c)
+
+  # gt2[(gt == "1/1")|(gt == "1|1")] <- 'BB'
+  # gt2[(gt == "0/0")|(gt == "0|0")] <- 'AA'
+  # gt2[(gt == "0/1")|(gt == "1/0")|(gt == "0|1")|(gt == "1|0")] <- 'AB'
+  # gt2[(gt == "\\./\\.")|(gt == "\\.|\\.")] <- NA
+
+  gt2 <- as_tibble(gt2d) %>% mutate(SNPID = fix_T$ID)
+
+  gt.simple <- fix_T %>% dplyr::select("ID", "CHROM", POS, REF, ALT) %>%
+    dplyr::rename(SNPID=ID, Chrom=CHROM, Position=POS) %>%
+    dplyr::left_join(gt2, by = 'SNPID')
+
+  return(gt.simple)
+}
+
+##
+
+VCFtoDF_NAM <- function(infile){
+
+  vcf <- read.vcfR(infile, verbose = FALSE)
+  gt <- extract.gt(vcf, element = "GT", as.numeric = F)
+  fix_T <- as_tibble(getFIX(vcf))
+
+  gt2 <- matrix(0, ncol = ncol(gt), nrow = nrow(gt))
+  colnames(gt2) <- colnames(gt)
+
+
+  gt2a <- apply(gt,2, function(x) gsub("1/1","BB",x))
+  gt2b <- gsub("0[/|]0","AA",gt2a)
+  gt2c <- gsub("[10][/|][10]","AB",gt2b)
+  gt2d <- gsub("\\.[/|]\\.","NA",gt2c)
+
+
+
+
+  gt2a <- apply(gt,2, function(x) gsub("1/1","BB",x))
+  gt2b <- gsub("0[/|]0","AA",gt2a)
+  gt2c <- gsub("[10][/|][10]","AB",gt2b)
+  gt2d <- gsub("\\.[/|]\\.","NA",gt2c)
+
+  # gt2[(gt == "1/1")|(gt == "1|1")] <- 'BB'
+  # gt2[(gt == "0/0")|(gt == "0|0")] <- 'AA'
+  # gt2[(gt == "0/1")|(gt == "1/0")|(gt == "0|1")|(gt == "1|0")] <- 'AB'
+  # gt2[(gt == "\\./\\.")|(gt == "\\.|\\.")] <- NA
+
+  gt2 <- as_tibble(gt2d) %>%
+    mutate(SNPID = fix_T$ID)
+
+  gt.simple <- fix_T %>% dplyr::select("ID", "CHROM", POS, REF, ALT) %>%
+    dplyr::rename(SNPID=ID, Chrom=CHROM, Position=POS) %>%
+    dplyr::left_join(gt2, by = 'SNPID')
+
+  return(gt.simple)
+}
+
+####
+
+getRankedPredictedValues_V2 <- function(Data_Table_Num_Filt_List,nTraits,trait,GPModel,optTS=NULL){
+
+	 TrainData_Table_Num_Filt <- Data_Table_Num_Filt_List[[1]]
+	 TestData_Table_Num_Filt <- Data_Table_Num_Filt_List[[2]]
+
+
+	 TestGenoTable <- apply(TestData_Table_Num_Filt[,-1],2,as.numeric)
+	 initCol <- grep("ss",colnames(TrainData_Table_Num_Filt))[1]
+
+	 if(is.null(optTS)){
+
+		 trainPheno0 <- as.numeric(as.character(TrainData_Table_Num_Filt[,trait]))
+		 geno_012 <- apply(TrainData_Table_Num_Filt[,c(initCol:(ncol(TrainData_Table_Num_Filt)-nTraits))],2,as.numeric)
+		 trainGeno <- apply(geno_012,2,function(x) x-1)
+		 Geno <- as.character(TrainData_Table_Num_Filt[,1])
+	 }
+
+	 if(!is.null(optTS)){
+	     strainID <- as.character(TrainData_Table_Num_Filt[,1])
+		 trainSetID <- as.character(as.vector(optTS))
+	     trainIndices <- which(strainID %in% trainSetID)
+		 trainPheno0 <- as.numeric(as.character(TrainData_Table_Num_Filt[trainIndices,trait]))
+		 geno_012 <- apply(TrainData_Table_Num_Filt[trainIndices,c(initCol:(ncol(TrainData_Table_Num_Filt)-nTraits))],2,as.numeric)
+		 trainGeno <- apply(geno_012,2,function(x) x-1)
+		 Geno <- as.character(TrainData_Table_Num_Filt[trainIndices,1])
+	 }
+
+
+	 if(anyNA(trainGeno)){
+		trainGeno_Imp0 <- snpQC(trainGeno,impute=TRUE,remove=FALSE)
+	 }else{trainGeno_Imp0 <- trainGeno}
+
+
+	  if(anyNA(TestGenoTable)){
+	    testGeno_Imp0 <- snpQC(TestGenoTable,impute=TRUE,remove=FALSE)
+		testGeno_Imp1 <- apply(testGeno_Imp0,2,function(x) as.numeric(x-1))
+		testNA <- apply(testGeno_Imp,2,function(x) length(which(is.na(x))))
+		testNAIndices <-(which(unlist(testNA) !=0))
+	 }else{testGeno_Imp1 <- apply(TestGenoTable,2,function(x) as.numeric(x-1))
+	    testNAIndices <- NULL
+	 }
+
+### Remove lines with NA
+	 if(anyNA(trainPheno0)){
+	   ph_NA_Indices <- which(is.na(trainPheno0))
+	   trainPheno <- trainPheno0[-ph_NA_Indices]
+	   trainGeno_Imp1 <- trainGeno_Imp0[-ph_NA_Indices,]
+	   Geno <- as.character(TrainData_Table_Num_Filt[-ph_NA_Indices,1])
+
+	 }
+	 if(!anyNA(trainPheno0)){
+
+	   trainPheno <- trainPheno0
+	   trainGeno_Imp1 <- trainGeno_Imp0
+	   Geno <- as.character(TrainData_Table_Num_Filt[,1])
+	 }
+
+
+### Check trainGeno and testGeno contain the same marker set
+    if(!is.null(testNAIndices)){
+	  trainssIDs <- colnames(trainGeno_Imp1)
+	  testssIDs <- colnames(testGeno_Imp1)
+	   if(length(trainssIDs) > length(testssIDs)){
+		 NAssID <- setdiff(trainssIDs,testssIDs)
+		 NAssIDIndex <- which(trainssIDs %in% NAssID)
+		 trainGeno_Imp <-  trainGeno_Imp1[,-NAssIDIndex]
+		 testGeno_Imp <-  testGeno_Imp1[,-testNAIndices]
+	   }
+	   if(length(trainssIDs) < length(testssIDs)){
+		   NAssID <- setdiff(testssIDs,trainssIDs)
+		   NAssIDIndex <- which(testssIDs %in% NAssID)
+		   testGeno_Imp <-  testGeno_Imp1[,-c(NAssIDIndex,testNAIndices)]
+		   trainGeno_Imp <-  trainGeno_Imp1
+	   }
+	   if(length(trainssIDs) == length(testssIDs)){
+	       if(length(which(trainssIDs %in% testssIDs)) == length(trainssIDs)){
+			   testGeno_Imp <-  testGeno_Imp1
+			   trainGeno_Imp <-  trainGeno_Imp1
+		   }
+		   if(length(which(trainssIDs %in% testssIDs)) != length(trainssIDs)){
+		       commonTestIndices <- which(testssIDs %in% trainssIDs)
+			   commonTrainIndices <- which(trainssIDs %in% testssIDs)
+			   testGeno_Imp <-  testGeno_Imp1[,commonTestIndices]
+			   trainGeno_Imp <-  trainGeno_Imp1[,commonTrainIndices]
+		   }
+	   }
+
+	}
+
+	if(is.null(testNAIndices) | length(testNAIndices)==0){
+
+	     trainssIDs <- colnames(trainGeno_Imp1)
+	     testssIDs <- colnames(testGeno_Imp1)
+	   if(length(trainssIDs) > length(testssIDs)){
+		 NAssID <- setdiff(trainssIDs,testssIDs)
+		 NAssIDIndex <- which(trainssIDs %in% NAssID)
+		 trainGeno_Imp <-  trainGeno_Imp1[,-NAssIDIndex]
+		 testGeno_Imp <-  testGeno_Imp1[,-testNAIndices]
+	   }
+	   if(length(trainssIDs) < length(testssIDs)){
+		   NAssID <- setdiff(testssIDs,trainssIDs)
+		   NAssIDIndex <- which(testssIDs %in% NAssID)
+		   testGeno_Imp <-  testGeno_Imp1[,-NAssIDIndex]
+		   trainGeno_Imp <-  trainGeno_Imp1
+	   }
+	   if(length(trainssIDs) == length(testssIDs)){
+	       if(length(which(trainssIDs %in% testssIDs)) == length(trainssIDs)){
+			   testGeno_Imp <-  testGeno_Imp1
+			   trainGeno_Imp <-  trainGeno_Imp1
+		   }
+		   if(length(which(trainssIDs %in% testssIDs)) != length(trainssIDs)){
+		       commonTestIndices <- which(testssIDs %in% trainssIDs)
+			   commonTrainIndices <- which(trainssIDs %in% testssIDs)
+			   testGeno_Imp <-  testGeno_Imp1[,commonTestIndices]
+			   trainGeno_Imp <-  trainGeno_Imp1[,commonTrainIndices]
+		   }
+	   }
+
+	 }
+
+
+
+## Kinship Matrix
+	 # A <- A.mat(trainGeno_Imp)
+	 # colnames(A) <- Geno
+	 # rownames(A) <- Geno
+
+## Prepare Data Table for GP
+	 Data <- cbind.data.frame(Geno,trainPheno)
+	 colnames(Data) <- c("Geno","Pheno")
+	 Geno <- "Geno"
+	 Pheno <- "Pheno"
+
+
+
+
+#### Impute trainGeno and train using mixed.solve
+
+
+	if(GPModel == "rrBLUP (rrBLUP)"){
+
+	 pred <- mixed.solve(trainPheno,Z=trainGeno_Imp,SE=FALSE,return.Hinv =FALSE)
+	 Mean <- as.numeric(pred$beta)
+	 Effects <- pred$u
+     PredictedValues <- Mean + (trainGeno_Imp %*% Effects)
+     SortedPredictedValues <- sort.int(PredictedValues,decreasing=TRUE,index.return=TRUE)
+
+	 Test_PredictedValues <-  Mean + (testGeno_Imp %*% Effects)
+
+	 Test_SortedPredictedValues <- sort.int(Test_PredictedValues,decreasing=TRUE,index.return=TRUE)
+	 Test_StrainID <- rownames(TestData_Table_Num_Filt)
+
+	 }
+
+
+	 if(GPModel == "rrBLUP (bWGR)"){
+
+		 pred <- emRR(trainPheno,trainGeno_Imp)
+		 Mean <- as.numeric(pred$mu)
+		 Effects <- pred$b
+
+
+		 PredictedValues <- Mean + (trainGeno_Imp %*% Effects)
+		 SortedPredictedValues <- sort.int(PredictedValues,decreasing=TRUE,index.return=TRUE)
+
+
+
+		 Test_PredictedValues <-  Mean + (testGeno_Imp %*% Effects)
+
+
+		 Test_SortedPredictedValues <- sort.int(Test_PredictedValues,decreasing=TRUE,index.return=TRUE)
+		 Test_StrainID <- rownames(TestData_Table_Num_Filt)
+
+	 }
+
+
+	  if(GPModel == "BayesB (bWGR)"){
+
+		 pred <- emBB(trainPheno,trainGeno_Imp)
+		 Mean <- as.numeric(pred$mu)
+		 Effects <- pred$b
+
+
+		 PredictedValues <- Mean + (trainGeno_Imp %*% Effects)
+		 SortedPredictedValues <- sort.int(PredictedValues,decreasing=TRUE,index.return=TRUE)
+		 Test_PredictedValues <-  Mean + (testGeno_Imp %*% Effects)
+
+
+		 Test_SortedPredictedValues <- sort.int(Test_PredictedValues,decreasing=TRUE,index.return=TRUE)
+		 Test_StrainID <- rownames(TestData_Table_Num_Filt)
+      }
+
+	  if(GPModel == "BayesLASSO (bWGR)"){
+
+		 pred <- emBL(trainPheno,trainGeno_Imp)
+		 Mean <- as.numeric(pred$mu)
+		 Effects <- pred$b
+
+		 PredictedValues <- Mean + (trainGeno_Imp %*% Effects)
+		 SortedPredictedValues <- sort.int(PredictedValues,decreasing=TRUE,index.return=TRUE)
+
+		 Test_PredictedValues <-  Mean + (testGeno_Imp %*% Effects)
+	     Test_SortedPredictedValues <- sort.int(Test_PredictedValues,decreasing=TRUE,index.return=TRUE)
+		 Test_StrainID <- rownames(TestData_Table_Num_Filt)
+      }
+
+
+###
+	# pred.kb <- kin.blup(as.data.frame(Data),Geno,Pheno,GAUSS=FALSE,K=A,covariate=NULL,PEV=TRUE,n.core=1,theta.seq=NULL)
+
+### Upper bound of Reliability
+    # if(length(testNAIndices)>0){
+       # trainGeno_Imp2 <- apply(trainGeno_Imp[,-testNAIndices],2,function(x) x+1)
+	# }
+	# if(length(testNAIndices)==0){
+	    # trainGeno_Imp2 <- apply(trainGeno_Imp,2,function(x) x+1)
+	# }
+    cleanData <- cleanREP(trainPheno,trainGeno_Imp)
+    M <-  cleanData[[2]]
+    M.Pdt <- t(M)%*% solve(M %*% t(M) + diag(nrow(M))) %*% M
+
+    getU <- function(M.Pdt,v){
+	   v.hat <- M.Pdt %*% v
+	   U <- (t(v.hat)%*% v.hat)/ (t(v) %*% v)
+	   return(U)
+    }
+
+	# if(length(testNAIndices)>0){
+      # U <- apply(testGeno_Imp[,-testNAIndices],1,function(x) getU(M.Pdt,x))
+	# }
+
+	  U <- apply(testGeno_Imp,1,function(x) getU(M.Pdt,x))
+
+
+	Test_SortedIndices <- Test_SortedPredictedValues[[2]]
+	Sorted_Test_StrainID <- Test_StrainID[Test_SortedIndices]
+	U_Sorted <- U[(Test_SortedIndices)]
+
+	outputDF <- cbind.data.frame(Sorted_Test_StrainID ,round(Test_SortedPredictedValues[[1]],digits=2),round(U_Sorted,digits=5))
+	colnames(outputDF) <- c("LineID",paste("Predicted Value for ",trait,sep=""),"Upper Bound of Reliability")
+
+
+   return(outputDF)
+
+ }
+
+
+######
+
+fixRefMismatches <- function(GenoTable_In, sampleInd){
+
+	message("Input dimensions: ", paste(dim(GenoTable_In), collapse = " x "))
+
+	## Get column indices for CHROM, POS, REF, ALT (both .x and .y)
+	InfoInd <- unlist(lapply(c("CHROM","POS","REF","ALT"), function(x) grep(x, colnames(GenoTable_In))))
+	RefxInd <- InfoInd[5]
+	RefyInd <- InfoInd[6]
+	AltxInd <- InfoInd[7]
+	AltyInd <- InfoInd[8]
+	colnames(GenoTable_In)[c(RefxInd,AltxInd)] <- c("REF.x","ALT.x")
+
+	# Identify various match/mismatch types
+	REFMatches_a1_a4_Ind <- which(GenoTable_In[,RefxInd] == GenoTable_In[,RefyInd])
+	REFMatches_ALT_a1_a4_Ind <- which(GenoTable_In[,RefxInd] == GenoTable_In[,AltyInd])
+	ALTMatches_REF_a1_a4_Ind <- which(GenoTable_In[,AltxInd] == GenoTable_In[,RefyInd])
+	REF_ALT_Swap_a1_a4_Ind <- intersect(REFMatches_ALT_a1_a4_Ind, ALTMatches_REF_a1_a4_Ind)
+
+	message("REF matches: ", length(REFMatches_a1_a4_Ind))
+	message("REF == ALT.y matches: ", length(REFMatches_ALT_a1_a4_Ind))
+	message("ALT == REF.y matches: ", length(ALTMatches_REF_a1_a4_Ind))
+	message("REF/ALT swaps needed: ", length(REF_ALT_Swap_a1_a4_Ind))
+
+	# Identify mismatches for filtering
+	REFMisMatches_a1_a4_Ind0 <- which(GenoTable_In[,RefxInd] != GenoTable_In[,RefyInd])
+	REFMatches_Other_a1_a4_Ind <- setdiff(REFMisMatches_a1_a4_Ind0, ALTMatches_REF_a1_a4_Ind)
+
+	message("Total REF mismatches: ", length(REFMisMatches_a1_a4_Ind0))
+	message("Non-swap mismatches: ", length(REFMatches_Other_a1_a4_Ind))
+
+	## Fix REF/ALT mismatches
+	GenoTable_filt_mod <- GenoTable_In
+	swapCorrectedInd <- c()
+
+    if(length(REF_ALT_Swap_a1_a4_Ind)>0){
+	# Swap REF/ALT fields
+	tmpRefToAlt <- GenoTable_filt_mod[REF_ALT_Swap_a1_a4_Ind, AltxInd]
+	GenoTable_filt_mod[REF_ALT_Swap_a1_a4_Ind, AltxInd] <- GenoTable_filt_mod[REF_ALT_Swap_a1_a4_Ind, RefxInd]
+	GenoTable_filt_mod[REF_ALT_Swap_a1_a4_Ind, RefxInd] <- tmpRefToAlt
+
+	# Genotype re-encoding
+
+	swap_genotypes <- function(gt) {
+		gt <- gsub("0 / 0", "BB", gt)
+		gt <- gsub("1 / 1", "0 / 0", gt)
+		gt <- gsub("BB", "1 / 1", gt)
+		gt <- gsub("1 / 0", "AB", gt)
+		gt <- gsub("0 / 1", "1 / 0", gt)
+		gt <- gsub("AB", "1 / 0", gt)
+		return(gt)
+	}
+
+	Gt_for_Swap <- GenoTable_filt_mod[REF_ALT_Swap_a1_a4_Ind, sampleInd]
+	Gt_Swapped <- apply(Gt_for_Swap, 2, swap_genotypes)
+	GenoTable_filt_mod[REF_ALT_Swap_a1_a4_Ind, sampleInd] <- Gt_Swapped
+
+    REF_ALT_Swap_a1_a4_Corr_Ind <- (which(GenoTable_filt_mod[REF_ALT_Swap_a1_a4_Ind,"REF.x"] == GenoTable_filt_mod[REF_ALT_Swap_a1_a4_Ind,"REF.y"]))
+
+    message("REF/ALT swaps corrected: ", length(REF_ALT_Swap_a1_a4_Corr_Ind))
+
+    swapCorrectedInd <- REF_ALT_Swap_a1_a4_Ind[REF_ALT_Swap_a1_a4_Corr_Ind]
+
+	}
+
+	## Strand flips (complementary base matching)
+	flipInd <- which(
+		(GenoTable_filt_mod[,RefxInd]=="A" & GenoTable_filt_mod[,RefyInd]=="T") |
+		(GenoTable_filt_mod[,RefxInd]=="T" & GenoTable_filt_mod[,RefyInd]=="A") |
+		(GenoTable_filt_mod[,RefxInd]=="C" & GenoTable_filt_mod[,RefyInd]=="G") |
+		(GenoTable_filt_mod[,RefxInd]=="G" & GenoTable_filt_mod[,RefyInd]=="C")
+	)
+	message("Strand flip candidates: ", length(flipInd))
+
+   flips_corrected_ind <- c()
+
+   if(length(flipInd)>0){
+
+	FlipAlleleMat_1 <- GenoTable_filt_mod[flipInd,]
+	FlipAlleleMat_1[,"REF.x"] <- chartr("TAGC", "ATCG", FlipAlleleMat_1[,"REF.x"])
+	FlipAlleleMat_1[,"ALT.x"] <- chartr("TAGC", "ATCG", FlipAlleleMat_1[,"ALT.x"])
+	GenoTable_filt_mod[flipInd,] <- FlipAlleleMat_1
+
+
+    flips_corr_Ind <- (which(GenoTable_filt_mod[flipInd,"REF.x"] == GenoTable_filt_mod[flipInd,"REF.y"]))
+	message("Flips corrected: ", length(flips_corr_Ind))
+
+
+	flips_remng_ind <- flipInd[setdiff(seq_len(length(flipInd)),flips_corr_Ind)]
+    flips_corrected_ind <- flipInd[flips_corr_Ind]
+
+   }
+
+	## Flip-Swap
+    RefMismatchInd_for_FlSw <- which(GenoTable_filt_mod[,RefxInd] != GenoTable_filt_mod[,RefyInd])
+    flipSwapInd <- setdiff(RefMismatchInd_for_FlSw,unique(c(swapCorrectedInd,flips_corrected_ind)))
+
+	message("Flip-swap candidates: ", length(flipSwapInd))
+
+   refmatchIndFlipSwap <- c()
+   if(length(flipSwapInd)>0){
+
+	AltCompBaseMat_1 <- GenoTable_filt_mod[flipSwapInd,]
+
+	TmpFlSwp_in_REF <- AltCompBaseMat_1[,"REF.x"]
+	TmpFlSwp_in_ALT <- AltCompBaseMat_1[,"ALT.x"]
+
+
+	AltCompBaseMat_1[,"REF.x"] <- chartr("TAGC", "ATCG", AltCompBaseMat_1[,"REF.x"])
+	AltCompBaseMat_1[,"ALT.x"] <- chartr("TAGC", "ATCG", AltCompBaseMat_1[,"ALT.x"])
+
+	###
+
+	AltCompBaseMat_2 <- AltCompBaseMat_1
+
+	##
+	tmpNt <- AltCompBaseMat_2[,"REF.x"]
+	AltCompBaseMat_2[,"REF.x"] <- AltCompBaseMat_2[,"ALT.x"]
+	AltCompBaseMat_2[,"ALT.x"] <- tmpNt
+
+    ## keep only those flip-swap markers that match the new ref
+	refmatchIndFlipSwap <- which(AltCompBaseMat_2[,"REF.x"] == AltCompBaseMat_2[,"REF.y"])
+	rmFlipSwapInd <- setdiff(seq_len(nrow(AltCompBaseMat_2)), refmatchIndFlipSwap)
+
+	##
+	AltCompBaseMat_2[rmFlipSwapInd,"REF.x"] <- TmpFlSwp_in_REF[rmFlipSwapInd]
+	AltCompBaseMat_2[rmFlipSwapInd,"ALT.x"] <- TmpFlSwp_in_ALT[rmFlipSwapInd]
+
+	Gt_FlipSwapped <- apply(AltCompBaseMat_2[refmatchIndFlipSwap,sampleInd], 2, swap_genotypes)
+	AltCompBaseMat_2[refmatchIndFlipSwap,sampleInd] <- Gt_FlipSwapped
+
+	GenoTable_filt_mod[flipSwapInd,] <- AltCompBaseMat_2
+
+    flipswap_corr_Ind <- (which(GenoTable_filt_mod[flipSwapInd,"REF.x"] == GenoTable_filt_mod[flipSwapInd,"REF.y"]))
+	message("Flipswaps corrected Ref: ", length(flipswap_corr_Ind))
+    }
+
+	# Remove mismatches still present after harmonization
+
+	# Remove mismatches still present after harmonization
+	flipswapMismatchesRmInd <- which(GenoTable_filt_mod[,"REF.x"] != GenoTable_filt_mod[,"REF.y"])
+	message("Remaining REF mismatches after all corrections: ", length(flipswapMismatchesRmInd))
+    if(length(flipswapMismatchesRmInd) >0){
+	  GenoTable_Out <- GenoTable_filt_mod[-flipswapMismatchesRmInd,]
+	}else{
+	  GenoTable_Out <- GenoTable_filt_mod
+	}
+
+	# After fixing mismatches, report summary
+	total_snps <- nrow(GenoTable_In)
+	kept_snps <- nrow(GenoTable_Out)
+	#removed_snps <- length(flipswapMismatchesRmInd)
+	removed_snps <- (total_snps-kept_snps)
+	n_swap <- length(REF_ALT_Swap_a1_a4_Ind)
+	n_flip <- length(flipInd)
+	#n_flipswap <- length(flipSwapInd)
+	n_flipswap <- length(refmatchIndFlipSwap)
+	n_match <- length(REFMatches_a1_a4_Ind)
+
+	meta_info <- list(
+		"Total SNPs input" = total_snps,
+		"REF matches (kept as-is)" = n_match,
+		"REF/ALT swapped" = n_swap,
+		"Strand flipped" = n_flip,
+		"Flip-swapped" = n_flipswap,
+		"Remaining mismatches removed" = removed_snps,
+		"SNPs in final output" = kept_snps
+	)
+
+	message("=== Harmonization Summary ===")
+	for (key in names(meta_info)) {
+	  message(sprintf("%-35s : %d", key, meta_info[[key]]))
+	}
+
+	return(list(
+	  GenoTable_Harmonized = GenoTable_Out,
+	  Harmonization_Report = meta_info
+	))
+
+}
+
+######
+
+getAGPVCF_Data <- function(AGP_Pop_Geno_Filt){
+
+AGP_Pop_Geno_Filt$CHROM <- unlist(lapply(strsplit(rownames(AGP_Pop_Geno_Filt),"_"),function(x) x[4]))
+AGP_Pop_Geno_Filt$POS <- unlist(lapply(strsplit(rownames(AGP_Pop_Geno_Filt),"_"),function(x) x[5]))
+AGP_Pop_Geno_Filt$REF <- unlist(lapply(strsplit(rownames(AGP_Pop_Geno_Filt),"_"),function(x) x[6]))
+AGP_Pop_Geno_Filt$ALT <- unlist(lapply(strsplit(rownames(AGP_Pop_Geno_Filt),"_"),function(x) x[7]))
+AGP_Pop_Geno_Filt$ChrPosV1 <- paste(AGP_Pop_Geno_Filt$CHROM,AGP_Pop_Geno_Filt$POS,sep="-")
+
+####
+
+BARC_markerIDs <- grep("BARC",rownames(AGP_Pop_Geno_Filt),value=TRUE)
+BARC_markerIDsInd <- grep("BARC",rownames(AGP_Pop_Geno_Filt))
+trt_markerIDs <- rownames(AGP_Pop_Geno_Filt)[c((BARC_markerIDsInd[length(BARC_markerIDsInd)]+1):length(rownames(AGP_Pop_Geno_Filt)))]
+trt_markerIDsInd <- c((BARC_markerIDsInd[length(BARC_markerIDsInd)]+1):length(rownames(AGP_Pop_Geno_Filt)))
+
+### Extract INFO Cols in a1.v1
+
+INFO_Cols1 <- as.data.frame(do.call(rbind,lapply(strsplit(BARC_markerIDs,"_"),function(x) x[c(4:7)])))
+colnames(INFO_Cols1) <- c("CHROM","POS","REF","ALT")
+INFO_Cols1$ChrPosV1 <- paste(INFO_Cols1$CHROM,INFO_Cols1$POS,sep="-")
+
+INFO_Cols <- as.data.frame(do.call(rbind,lapply(strsplit(BARC_markerIDs,"_"),function(x) x[c(4:7)])))
+colnames(INFO_Cols) <- c("CHROM","POS","REF","ALT")
+INFO_Cols$ChrPosV1 <- paste(INFO_Cols$CHROM,INFO_Cols$POS,sep="-")
+
+
+###
+rownames(AGP_Pop_Geno_Filt)[c(length(rownames(AGP_Pop_Geno_Filt))-1,length(rownames(AGP_Pop_Geno_Filt)))]
+AGP_Pop_Geno_Filt[trt_markerIDsInd,1:5]
+
+AGP_Pop_Geno_Filt_Mod <- merge(INFO_Cols1,AGP_Pop_Geno_Filt,by="ChrPosV1")
+colnames(AGP_Pop_Geno_Filt_Mod)[1] <- "CHROM.POS"
+
+#### ssIDs are not provided in the AGP Genotype File. ssIDs are extracted from NUST BARCSoySNP6K
+#### data.
+#### Read InfoCols from NUST_Geno.vcf BARCSoySNP6K
+
+infileVCF <- "NUST_Geno.vcf"
+# Set the file path to the VCF file
+vcf_file <- infileVCF
+
+
+# Open a connection to the VCF file and skip the meta info lines
+vcf_conn <- file(vcf_file, open = "r")
+header <- c()
+while (TRUE) {
+  line <- readLines(vcf_conn, n = 1)
+  if (startsWith(line, "##")) {
+    header<- c(header,line)
+    next
+  } else {
+    # Once we reach the information row, break out of the loop
+    info_row <- line
+    break
+  }
+}
+
+# Read in the data in the VCF file, starting from the information row
+NUST_Geno_vcf_data <- read.table(vcf_conn, header = FALSE)
+close(vcf_conn)
+
+# Print the information row and the first few rows of the VCF data
+colnames(NUST_Geno_vcf_data) <- unlist(strsplit(info_row,"\t"))
+#head(NUST_Geno_vcf_data)
+
+colnames(NUST_Geno_vcf_data)[1]<- "CHROM"
+
+#####
+
+NUST_Geno_IDs <- NUST_Geno_vcf_data[,"ID"]
+
+NUST_Geno_vcf_data <- droplevels(NUST_Geno_vcf_data)
+
+chr9Ind <- which(as.numeric(NUST_Geno_vcf_data$CHROM) <10)
+chr10Ind <- which(as.numeric(NUST_Geno_vcf_data$CHROM) >=10)
+
+NUST_Geno_vcf_data$CHROM[chr9Ind] <- paste("Gm0",as.numeric(NUST_Geno_vcf_data$CHROM)[chr9Ind],sep="")
+NUST_Geno_vcf_data$CHROM[chr10Ind] <- paste("Gm",NUST_Geno_vcf_data$CHROM[chr10Ind],sep="")
+NUST_Geno_vcf_data$ChrPosV1 <- paste(NUST_Geno_vcf_data$CHROM,NUST_Geno_vcf_data$POS,sep="-")
+
+### Merge NUSTGenoVCF, INFOCols
+
+INFO_Cols_V1 <- merge(INFO_Cols,NUST_Geno_vcf_data,by="ChrPosV1",all.x=TRUE)
+
+###
+
+REF_Match <- unlist(lapply(c(1:nrow(INFO_Cols_V1)),function(x) if(INFO_Cols_V1[x,"REF.x"]== INFO_Cols_V1[x,"REF.y"]){1}else{0}))
+ALT_Match <- unlist(lapply(c(1:nrow(INFO_Cols_V1)),function(x) if(INFO_Cols_V1[x,"ALT.x"]== INFO_Cols_V1[x,"ALT.y"]){1}else{0}))
+
+length(REF_Match)
+length(ALT_Match)
+
+INFO_Cols_Mod <- INFO_Cols_V1[,c("CHROM.x","POS.x","ID","REF.x","ALT.x")]
+colnames(INFO_Cols_Mod) <- c("CHROM","POS","ID","REF","ALT")
+QUAL <- rep(".",nrow(INFO_Cols_Mod))
+FILTER <- rep("PASS",nrow(INFO_Cols_Mod))
+INFO <- rep(".",nrow(INFO_Cols_Mod))
+FORMAT <- rep("GT",nrow(INFO_Cols_Mod))
+
+INFO_Cols_Tab <- cbind.data.frame(INFO_Cols_Mod,QUAL,FILTER,INFO,FORMAT)
+INFO_Cols_Tab$`CHROM.POS` <- paste(INFO_Cols_Tab$CHROM,INFO_Cols_Tab$POS,sep="-")
+
+####
+### Create INFO Cols Tab from
+
+AGP_Pop_Geno_Filt_VCF <- merge(INFO_Cols_Tab,AGP_Pop_Geno_Filt_Mod,by="CHROM.POS")
+
+rmColInd <- grep("\\.[xy]",colnames(AGP_Pop_Geno_Filt_VCF))
+if(length(rmColInd) >0){ rmColIndx <- c(1,rmColInd)}else{rmColIndx <- 1}
+
+AGP_Pop_Geno_Filt_VCF$POS <- as.numeric(AGP_Pop_Geno_Filt_VCF$POS)
+AGP_Pop_Geno_Filt_VCF_Mod0 <- AGP_Pop_Geno_Filt_VCF[order(AGP_Pop_Geno_Filt_VCF$CHROM,AGP_Pop_Geno_Filt_VCF$POS),-rmColIndx]
+print(dim(AGP_Pop_Geno_Filt_VCF_Mod0))
+
+
+### Scan table for additional ALT alleles and add to ALT Field
+InfoCols <- colnames(INFO_Cols_Tab)
+
+scan_addALT <- function(AGP_Pop_Geno_Filt_VCF_Mod,InfoCols,nR){
+
+	GenoVec <- unlist(AGP_Pop_Geno_Filt_VCF_Mod[nR,])
+	GenoVecMod <- (GenoVec)
+	samples <- setdiff(colnames(AGP_Pop_Geno_Filt_VCF_Mod),InfoCols)
+	sampleColIndx2 <- which(colnames(AGP_Pop_Geno_Filt_VCF_Mod) %in% samples)
+
+	markerVals0 <-levels(factor(GenoVec[sampleColIndx2]))
+	markerVals0ModInd <- grep("/",markerVals0)
+
+	if(length(markerVals0ModInd)>0){ markerVals0Mod_1 <- markerVals0[-markerVals0ModInd]}else{markerVals0Mod_1 <- markerVals0}
+
+	markerVals0Mod0 <- grep("/",markerVals0,value=TRUE)
+	if(length(markerVals0Mod0) >0){
+	  markerVals0Mod <- gsub(" ","",markerVals0Mod0)
+	  markerVals0Mod_2 <- unlist(lapply(markerVals0Mod,function(x) unlist(strsplit(x,"/"))))
+	}else{markerVals0Mod_2 <- NULL}
+	markerVals <- levels(factor(c(markerVals0Mod_1,markerVals0Mod_2)))
+
+	markersTrueSet <- c(GenoVec[c("REF","ALT")],"FAIL")
+	addtnMarkerStates <- setdiff(markerVals,markersTrueSet)
+    if(length(addtnMarkerStates) >0 ){GenoVecMod["ALT"] <- paste(GenoVecMod["ALT"],paste(addtnMarkerStates,collapse=","),sep=",")}
+
+	return(GenoVecMod)
+}
+
+ AGP_Pop_Geno_Filt_VCF_Mod <- do.call(rbind.data.frame,lapply(1:nrow(AGP_Pop_Geno_Filt_VCF_Mod0),function(x) scan_addALT(AGP_Pop_Geno_Filt_VCF_Mod0,InfoCols,x)))
+ colnames(AGP_Pop_Geno_Filt_VCF_Mod) <- colnames(AGP_Pop_Geno_Filt_VCF_Mod0)
+
+##### Translate allelic code to numeric code
+InfoCols <- colnames(INFO_Cols_Tab)
+samples <- setdiff(colnames(AGP_Pop_Geno_Filt_VCF_Mod),InfoCols)
+sampleColIndx2 <- which(colnames(AGP_Pop_Geno_Filt_VCF_Mod) %in% samples)
+RefIndx <- which(colnames(AGP_Pop_Geno_Filt_VCF_Mod) %in% "REF")
+AltIndx <- which(colnames(AGP_Pop_Geno_Filt_VCF_Mod) %in% "ALT")
+
+# Define a function to translate genotype codes
+translate_genotype_vcf_num <- function(genotype,sampleColIndx2,RefIndx,AltIndx){
+  genotypeMod <- genotype
+  HomIndx <- grep("/",genotypeMod[sampleColIndx2],invert=TRUE)
+  HetIndx <- grep("/",genotypeMod[sampleColIndx2],invert=FALSE)
+
+  ## FAIL
+  genotypeMod[sampleColIndx2] <- gsub("FAIL","\\./\\.",genotypeMod[sampleColIndx2])
+
+  ## REF
+  genotypeMod[sampleColIndx2] <- gsub(as.character(genotypeMod[RefIndx]),"0",genotypeMod[sampleColIndx2])
+  genotypeMod[sampleColIndx2][HomIndx] <- gsub("0","0/0",genotypeMod[sampleColIndx2][HomIndx])
+
+
+  ## ALT
+  if(length(grep(",",genotypeMod[AltIndx]))>0){
+     AltState <- unlist(strsplit(as.character(genotypeMod[AltIndx]),",")[[1]])
+  }else{AltState <- genotypeMod[AltIndx]}
+
+  AltState <- gsub(" ","",AltState)
+
+  for(nAlt in 1:length(AltState)){
+  #genotypeMod[sampleColIndx2] <- gsub(genotypeMod[AltIndx],"1",genotypeMod[sampleColIndx2])
+   genotypeMod[sampleColIndx2] <- gsub(AltState[nAlt],as.character(nAlt),genotypeMod[sampleColIndx2])
+  }
+  for(nAlt in 1:length(AltState)){
+   genotypeMod[sampleColIndx2][HomIndx] <- gsub(as.character(nAlt),paste(as.character(nAlt),"/",as.character(nAlt),sep=""),genotypeMod[sampleColIndx2][HomIndx])
+  }
+
+  genotypeMod[sampleColIndx2][HetIndx] <- gsub(" ","",genotypeMod[sampleColIndx2][HetIndx])
+  genotypeMod
+}
+
+### Translate genotypes for all samples into numeric code
+
+vcf_data_num <- do.call(rbind,lapply(c(1:nrow(AGP_Pop_Geno_Filt_VCF_Mod)),function(x)translate_genotype_vcf_num(AGP_Pop_Geno_Filt_VCF_Mod[x,],sampleColIndx2,RefIndx,AltIndx))) # Translate genotypes
+vcf_data_num$CHROM <- as.factor(vcf_data_num$CHROM)
+vcf_data_num$POS <- as.numeric(vcf_data_num$POS)
+
+vcf_data_num_sort <- vcf_data_num[order(vcf_data_num$CHROM,vcf_data_num$POS),]
+print(dim(vcf_data_num_sort))
+
+print(table(apply(vcf_data_num_sort[,sampleColIndx2],2,as.character)))
+
+### Write complete VCF
+#### AGP Genotyping Plate
+
+
+vcf_data <- vcf_data_num_sort
+colCHR <- grep("CHR",colnames(vcf_data))
+colFmt <- grep("FORMAT",colnames(vcf_data))
+AGP_Geno_Data <- vcf_data
+
+###Filter Markers
+### Filt 1: Rm markers with NA IDs
+Filt1_Ind <- which(is.na(AGP_Geno_Data[,"ID"]))
+if(length(Filt1_Ind)>0){AGP_Geno_Data_Out_Filt1 <- AGP_Geno_Data[-Filt1_Ind,]}else{AGP_Geno_Data_Out_Filt1 <- AGP_Geno_Data}
+
+### Filt2 Rm markers with duplicated IDs
+Filt2_Ind <- which(duplicated(AGP_Geno_Data_Out_Filt1[,"ID"]))
+if(length(Filt2_Ind)>0){AGP_Geno_Data_Out_Filt2 <- AGP_Geno_Data_Out_Filt1[-Filt2_Ind,]}else{AGP_Geno_Data_Out_Filt2 <- AGP_Geno_Data_Out_Filt1}
+AGP_Geno_Data_Out_Filt2$CHROM <- gsub("Gm[0]*","",AGP_Geno_Data_Out_Filt2$CHROM)
+
+scaffoldInd <- grep("scaffold",AGP_Geno_Data_Out_Filt2$CHROM)
+if(length(scaffoldInd)>0){AGP_Geno_Data_Out_Filt3 <- AGP_Geno_Data_Out_Filt2[-scaffoldInd,]}else{AGP_Geno_Data_Out_Filt3 <- AGP_Geno_Data_Out_Filt2}
+
+ print(length(samples))
+
+ print(dim(AGP_Geno_Data_Out_Filt3))
+
+
+ ###
+
+ return(AGP_Geno_Data_Out_Filt3)
+}
+
+
+#######
+
+scan_addALT <- function(AGP_Pop_Geno_Filt_VCF_Mod,InfoCols,nR){
+
+	GenoVec <- unlist(AGP_Pop_Geno_Filt_VCF_Mod[nR,])
+	GenoVecMod <- (GenoVec)
+	samples <- setdiff(colnames(AGP_Pop_Geno_Filt_VCF_Mod),InfoCols)
+	sampleColIndx2 <- which(colnames(AGP_Pop_Geno_Filt_VCF_Mod) %in% samples)
+
+	markerVals0 <-levels(factor(GenoVec[sampleColIndx2]))
+	markerVals0ModInd <- grep("/",markerVals0)
+
+	if(length(markerVals0ModInd)>0){ markerVals0Mod_1 <- markerVals0[-markerVals0ModInd]}else{markerVals0Mod_1 <- markerVals0}
+
+	markerVals0Mod0 <- grep("/",markerVals0,value=TRUE)
+	if(length(markerVals0Mod0) >0){
+	  markerVals0Mod <- gsub(" ","",markerVals0Mod0)
+	  markerVals0Mod_2 <- unlist(lapply(markerVals0Mod,function(x) unlist(strsplit(x,"/"))))
+	}else{markerVals0Mod_2 <- NULL}
+	markerVals <- levels(factor(c(markerVals0Mod_1,markerVals0Mod_2)))
+
+	markersTrueSet <- c(GenoVec[c("REF","ALT")],"FAIL")
+	addtnMarkerStates <- setdiff(markerVals,markersTrueSet)
+    if(length(addtnMarkerStates) >0 ){GenoVecMod["ALT"] <- paste(GenoVecMod["ALT"],paste(addtnMarkerStates,collapse=","),sep=",")}
+
+	return(GenoVecMod)
+}
+
+
+translate_genotype_vcf_num <- function(genotype,sampleColIndx2,RefIndx,AltIndx){
+  genotypeMod <- genotype
+  HomIndx <- grep("/",genotypeMod[sampleColIndx2],invert=TRUE)
+  HetIndx <- grep("/",genotypeMod[sampleColIndx2],invert=FALSE)
+
+  ## FAIL
+  genotypeMod[sampleColIndx2] <- gsub("FAIL","\\./\\.",genotypeMod[sampleColIndx2])
+
+  ## REF
+  genotypeMod[sampleColIndx2] <- gsub(as.character(genotypeMod[RefIndx]),"0",genotypeMod[sampleColIndx2])
+  genotypeMod[sampleColIndx2][HomIndx] <- gsub("0","0/0",genotypeMod[sampleColIndx2][HomIndx])
+
+
+  ## ALT
+  if(length(grep(",",genotypeMod[AltIndx]))>0){
+     AltState <- unlist(strsplit(as.character(genotypeMod[AltIndx]),",")[[1]])
+  }else{AltState <- genotypeMod[AltIndx]}
+
+  AltState <- gsub(" ","",AltState)
+
+  for(nAlt in 1:length(AltState)){
+  #genotypeMod[sampleColIndx2] <- gsub(genotypeMod[AltIndx],"1",genotypeMod[sampleColIndx2])
+   genotypeMod[sampleColIndx2] <- gsub(AltState[nAlt],as.character(nAlt),genotypeMod[sampleColIndx2])
+  }
+  for(nAlt in 1:length(AltState)){
+   genotypeMod[sampleColIndx2][HomIndx] <- gsub(as.character(nAlt),paste(as.character(nAlt),"/",as.character(nAlt),sep=""),genotypeMod[sampleColIndx2][HomIndx])
+  }
+
+  genotypeMod[sampleColIndx2][HetIndx] <- gsub(" ","",genotypeMod[sampleColIndx2][HetIndx])
+  genotypeMod
+}
+
+
+#######
+
+getCombinedTab_V0 <- function(outputListME,TraitME,IDColsME,IDColME,fitEnvCov){
+
+ if(fitEnvCov==FALSE){
+  Models <- c("MM","MDs","MDe")
+ }else if(fitEnvCov == TRUE){
+  Models <- c("EMM","EMDs","EMDe")
+ }
+  nTraits <- length(TraitME)
+  Pred_Out <- outputListME$preds
+
+  for(nTrt in 1:nTraits){
+
+	traitME <- TraitME[nTrt]
+    Fit_Pred <- Pred_Out[[nTrt]]
+    nMod <- length(Fit_Pred)
+
+    for(nM in 1:nMod){
+	 if(nM==1){
+	    Fit_Out <- Fit_Pred[[nM]]
+		uniqIDCol <- which(colnames(Fit_Out) == IDColME)
+		colnames(Fit_Out)[uniqIDCol] <- "UniqID"
+		colnames(Fit_Out) <- gsub("Obs",paste("Obs",Models[nM],sep="-"),colnames(Fit_Out))
+		colnames(Fit_Out) <- gsub("Pred",paste("Pred",Models[nM],sep="-"),colnames(Fit_Out))
+	 }else if(nM>1){
+
+	    Fit_Pred_Tab <- Fit_Pred[[nM]]
+		uniqIDCol <- which(colnames(Fit_Pred_Tab) == IDColME)
+		colnames(Fit_Pred_Tab)[uniqIDCol] <- "UniqID"
+		colnames(Fit_Pred_Tab) <- gsub("Obs",paste("Obs",Models[nM],sep="-"),colnames(Fit_Pred_Tab))
+		colnames(Fit_Pred_Tab) <- gsub("Pred",paste("Pred",Models[nM],sep="-"),colnames(Fit_Pred_Tab))
+
+	    Fit_Out <- merge(Fit_Out,Fit_Pred_Tab,by="UniqID",all=TRUE)
+	 }
+	}
+
+	if(nTrt ==1){
+	 colnames(Fit_Out) <- gsub("Obs",paste(traitME,"Obs",sep=""),colnames(Fit_Out))
+	 colnames(Fit_Out) <- gsub("Pred",paste(traitME,"Pred",sep=""),colnames(Fit_Out))
+	 Fit_Out_Tab <- Fit_Out
+
+	}else{
+	 colnames(Fit_Out) <- gsub("Obs",paste(traitME,"Obs",sep=""),colnames(Fit_Out))
+	 colnames(Fit_Out) <- gsub("Pred",paste(traitME,"Pred",sep=""),colnames(Fit_Out))
+	 Fit_Out_Tab <- merge(Fit_Out_Tab,Fit_Out,by="UniqID",all=TRUE)
+	}
+
+
+   }
+
+    valCols <- colnames(Fit_Out_Tab)[grep("Obs|Pred",colnames(Fit_Out_Tab))]
+	selOutCols <- c("UniqID",setdiff(IDColsME,IDColME),valCols)
+	print(colnames(Fit_Out_Tab))
+	print(selOutCols)
+	print(setdiff(selOutCols,colnames(Fit_Out_Tab)))
+	Fit_Out_Tab_Sel <- Fit_Out_Tab[,selOutCols]
+
+
+	return(Fit_Out_Tab_Sel)
+
+  }
+
+
+maskTargetSet <- function(DT_List,maskVar,maskVarLev,maskProp,LocME,YrME){
+
+  nTrt <- 1
+  DT_1_Filt_List <- DT_List
+  DT_1 <- DT_1_Filt_List[[nTrt]]
+  genoDat <- genoDat_List[[nTrt]]
+  trait <- traits[nTrt]
+  DT_Msk_List <- list()
+
+  if(LocME == "All"){
+		DT_1A <- DT_1
+  }else if(LocME != "All"){
+	    locInd <- which(DT_1$Loc %in% LocME)
+		DT_1A <- DT_1[locInd,]
+  }
+
+  if(YrME =="All"){
+		DT_1B <- DT_1A
+  }else if(YrME != "All"){
+		yrInd <- which(DT_1A$Year %in% YrME)
+		DT_1B <- DT_1A[yrInd,]
+	 }
+
+
+  DT_2 <- DT_1B
+  dim(DT_2)
+
+
+  nanInd <-   which(is.nan(DT_2[,trait]))
+  if(length(nanInd)>0){DT_2 <- DT_2[-nanInd,]}
+
+  DT_2 <- droplevels(DT_2)
+
+  maskFactCol <- which(colnames(DT_2) %in% maskFact)
+  maskFactInd <- which(DT_2[,maskFactCol] %in% maskFactLev)
+  nMaskFact <- length(maskFactInd)
+  maskInd <- sample(c(1:nMaskFact),nMaskFact*maskProp,replace=FALSE)
+
+  DT_2[maskInd,Trait] <- NA
+
+  DT_Msk_List[[nTrt]] <- DT_2
+
+  return(DT_Msk_List)
+}
+

@@ -225,5 +225,7 @@
   invisible(NULL)
 }
 
-# Run immediately when sourced directly
-.gs4pb_install()
+# Run immediately when sourced directly (not when loaded via install_gs4pb_deps())
+if (identical(environment(), globalenv())) {
+  .gs4pb_install()
+}

@@ -37,7 +37,7 @@
     "getMTCVR", "getRankedPredictedValuesMT", "summarize_MT_Fits"
   ),
   "R/ME_Functions.R" = c(
-    "getMEPred", "stdizePhVarNames"
+    "getMEPred", "stdizePhVarNames", "fitMEModels_LOFO_Pred"
   ),
   "R/Imputation_Functions.R" = c(
     "getImputedData_Num", "getImputedData_LDKNNI",

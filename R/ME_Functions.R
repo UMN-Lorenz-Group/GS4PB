@@ -280,10 +280,43 @@ stdizeGPCovarNames <- function(IDColsME,StrainME,EnvVarME,varEnv_MEGP,fixMEGP,ms
 
 
 
-###	
-
-
-
+#' Leave-One-Factor-Out Prediction for Multi-Environment Models
+#'
+#' Fits ME genomic prediction models using a leave-one-factor-level-out CV
+#' scheme. Supports MM, MDs, MDe (multi-env) and SM (single-env) BGGE models.
+#'
+#' @param DT_1_Filt_List List of filtered data tables, one per trait.
+#' @param genoDat_List List of genotype matrices, one per trait.
+#' @param traits Character vector of trait names.
+#' @param KG Genomic kinship matrix (optional).
+#' @param KE Environmental kernel matrix (optional).
+#' @param factrVar Factor variable name for leave-one-factor-out CV.
+#' @param maskFactrLev Factor level to mask (leave out).
+#' @param maskProp Proportion of factor level to mask (default 1).
+#' @param nSampleReps Number of sampling replicates (default 1).
+#' @param fixedME Fixed effect variable names.
+#' @param envVar Environment variable name.
+#' @param IDColsME Vector of ID column names.
+#' @param IDColME Unique ID column name.
+#' @param LocME Location filter ("All" or specific location).
+#' @param YrME Year filter ("All" or specific year).
+#' @param KMethod Kernel method for building kinship kernels.
+#' @param FitEnvModels Logical; include environmental kernel (default FALSE).
+#' @param Reaction Logical; use reaction norm model (default FALSE).
+#' @param dimension_KE Dimension for KE (optional).
+#' @param bandwidth Bandwidth parameter (default 1).
+#' @param quantil Quantile parameter (default 0.5).
+#' @param b_iter BGGE/BGLR iterations (default 1000).
+#' @param b_burnin BGGE/BGLR burn-in (default 200).
+#' @param b_thin BGGE/BGLR thinning (default 10).
+#' @param b_tol BGGE/BGLR tolerance (default 1e-10).
+#' @param b_R2 BGGE/BGLR R2 prior (default 0.5).
+#' @param b_digits Rounding digits for Maturity.rating (default 4).
+#'
+#' @return A list with elements \code{Cor}, \code{vcomp}, and \code{preds},
+#'   each a list of length \code{nTraits}.
+#'
+#' @export
 fitMEModels_LOFO_Pred <- function(DT_1_Filt_List,genoDat_List,traits,KG = NULL,KE = NULL,factrVar, maskFactrLev, maskProp=1,nSampleReps=1,fixedME,envVar,IDColsME,IDColME,LocME,YrME,KMethod,FitEnvModels=FALSE,Reaction = FALSE,dimension_KE=NULL,bandwidth = 1,quantil = 0.5,b_iter = 1000,b_burnin = 200,b_thin = 10,b_tol = 1e-10,b_R2 = 0.5, b_digits = 4){
 
 

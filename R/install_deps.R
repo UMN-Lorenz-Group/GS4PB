@@ -35,7 +35,7 @@ install_gs4pb_deps <- function(
 
   # Source the script's internal function without auto-running it,
   # then call with user-supplied arguments.
-  env <- new.env(parent = emptyenv())
+  env <- new.env(parent = baseenv())
   sys.source(script, envir = env, keep.source = FALSE)
   env$.gs4pb_install(
     cran_mirror    = cran_mirror,

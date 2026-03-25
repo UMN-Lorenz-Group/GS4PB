@@ -2,6 +2,7 @@
 
 export(VCFtoDF)
 export(fitMEModels_CV_fits)
+export(fitMEModels_LOFO_Pred)
 export(getEnvData)
 export(getEnvKernel)
 export(getFilteredSitesGenoData)

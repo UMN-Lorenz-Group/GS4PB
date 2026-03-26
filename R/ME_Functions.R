@@ -594,6 +594,7 @@ fitMEModels_LOFO_Pred <- function(DT_1_Filt_List,genoDat_List,traits,KG = NULL,K
 			UniqID = DT_Out[[uniqid]][Test_Idx],
 			Strain = DT_Out[[gid]][Test_Idx],
 			Env    = DT_Out[[env]][Test_Idx],
+			Rep    = sampRepNo,
 			Obs    = obs_factr,
 			Pred   = pred_MM_factr
 		  )
@@ -603,6 +604,7 @@ fitMEModels_LOFO_Pred <- function(DT_1_Filt_List,genoDat_List,traits,KG = NULL,K
 			UniqID = DT_Out[[uniqid]][Test_Idx],
 			Strain = DT_Out[[gid]][Test_Idx],
 			Env    = DT_Out[[env]][Test_Idx],
+			Rep    = sampRepNo,
 			Obs    = obs_factr,
 			Pred   = pred_MDs_factr
 		  )
@@ -612,6 +614,7 @@ fitMEModels_LOFO_Pred <- function(DT_1_Filt_List,genoDat_List,traits,KG = NULL,K
 			UniqID = DT_Out[[uniqid]][Test_Idx],
 			Strain = DT_Out[[gid]][Test_Idx],
 			Env    = DT_Out[[env]][Test_Idx],
+			Rep    = sampRepNo,
 			Obs    = obs_factr,
 			Pred   = pred_MDe_factr
 		  )
@@ -652,6 +655,7 @@ fitMEModels_LOFO_Pred <- function(DT_1_Filt_List,genoDat_List,traits,KG = NULL,K
 			UniqID = DT_Out[[uniqid]][Test_Idx],
 			Strain = DT_Out[[gid]][Test_Idx],
 			Env    = DT_Out[[env]][Test_Idx],
+			Rep    = sampRepNo,
 			Obs    = obs_factr,
 			Pred   = pred_SM
 		  )

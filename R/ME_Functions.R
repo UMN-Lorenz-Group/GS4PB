@@ -364,13 +364,11 @@ fitMEModels_LOFO_Pred <- function(DT_1_Filt_List,genoDat_List,traits,KG = NULL,K
   factInd <- which(IDColsME %in% factrVar)
   factVarMod <- factrVar
   factVarMod <- IDColsMEMod[factInd]
-  
-##  
-  fixInd <- which(IDColsME %in% fixedME)
-  fixedMEMod <-  IDColsMEMod[fixInd] 
 
-##  
-  ke <- KE
+##
+  fixInd <- which(IDColsME %in% fixedME)
+  fixedMEMod <-  IDColsMEMod[fixInd]
+
   strainGeno <- rownames(genoDat)
 
 ##
@@ -409,14 +407,9 @@ fitMEModels_LOFO_Pred <- function(DT_1_Filt_List,genoDat_List,traits,KG = NULL,K
   DT_masked_rep <- vector("list", nSampleReps)
   train_idx_rep <- vector("list", nSampleReps)
   test_idx_rep  <- vector("list", nSampleReps)
-  novel_gid_rep <- vector("list", nSampleReps)
 
-  base_seed <- 125 
-    
-  cor_LOT_CV_List_reps <- list()
-  var_LOT_CV_List_reps <- list()
-  fit_Out_LOT_CV_List_reps <- list() 
-  
+  base_seed <- 125
+
   ord <- order(DT_2$env,DT_2$gid)
   DT_2_ord <- DT_2[ord,,drop=FALSE]
   
@@ -425,10 +418,7 @@ fitMEModels_LOFO_Pred <- function(DT_1_Filt_List,genoDat_List,traits,KG = NULL,K
   factrIndices <- which(factr_mask) # same rows in 2B; we only NA-out the value col 
   DT_2_Factr <- DT_2_ord[factrIndices,]
 
-  nMask <- round(length(factrIndices)*maskProp,digits=0)
-  k <- round(1/maskProp,digits=0)
-  
- # maskfactrIndices <- sample(factrIndices,nMask,replace=FALSE)
+  k <- round(1/maskProp, digits=0)
 
  # Within a factor level perform k-fold CV-1 like split, where  
  # CV1: leave-genotypes-out across ALL environments
@@ -510,20 +500,18 @@ fitMEModels_LOFO_Pred <- function(DT_1_Filt_List,genoDat_List,traits,KG = NULL,K
 	fit_MDe_df_Out <- NULL
 	fit_SM_df_Out  <- NULL
 
-	varMM_LOT_CV  <- varMDs_LOT_CV <- varMDe_LOT_CV <- NULL
-	corSM_LOT_CV  <- varSM_LOT_CV  <- NULL
+	# VarComp collectors — accumulate per fold, average after loops
+	varMM_folds  <- list(); varMDs_folds <- list(); varMDe_folds <- list()
+	varSM_folds  <- list()
+	corSM_LOT_CV <- NULL
 
 	for (sampRepNo in seq_len(nSampleReps)) {
 
 	  DT_lists  <- MaskedData$DT_masked[[sampRepNo]]
-	  tr_lists  <- MaskedData$train_idx[[sampRepNo]]
-	  tst_lists <- MaskedData$test_idx [[sampRepNo]]
 
 	  for (f in seq_along(DT_lists)) {
 
-		DT_f   <- DT_lists[[f]]
-		tr_idx <- tr_lists[[f]]
-		ts_idx <- tst_lists[[f]]
+		DT_f <- DT_lists[[f]]
 
 		# Response and keys
 		y <- "value"; gid <- "gid"; env <- "env"
@@ -598,9 +586,9 @@ fitMEModels_LOFO_Pred <- function(DT_1_Filt_List,genoDat_List,traits,KG = NULL,K
 		  pred_MDs_factr <- fit_MDs$yHat[Test_Idx]
 		  pred_MDe_factr <- fit_MDe$yHat[Test_Idx]
 
-		  varMM_LOT_CV  <- fit_MM$VarComp
-		  varMDs_LOT_CV <- fit_MDs$VarComp
-		  varMDe_LOT_CV <- fit_MDe$VarComp
+		  varMM_folds[[length(varMM_folds)+1]]   <- fit_MM$VarComp
+		  varMDs_folds[[length(varMDs_folds)+1]] <- fit_MDs$VarComp
+		  varMDe_folds[[length(varMDe_folds)+1]] <- fit_MDe$VarComp
 
 		  mm_df <- data.frame(
 			UniqID = DT_Out[[uniqid]][Test_Idx],
@@ -658,8 +646,7 @@ fitMEModels_LOFO_Pred <- function(DT_1_Filt_List,genoDat_List,traits,KG = NULL,K
 		  obs_factr   <- DT_Out$Obs[Test_Idx]
 		  pred_SM     <- fit_SM$yHat[Test_Idx]
 
-		  corSM_LOT_CV <- cor(pred_SM, obs_factr, use = "pairwise.complete.obs")
-		  varSM_LOT_CV <- fit_SM$VarComp
+		  varSM_folds[[length(varSM_folds)+1]] <- fit_SM$VarComp
 
 		  sm_df <- data.frame(
 			UniqID = DT_Out[[uniqid]][Test_Idx],
@@ -675,6 +662,16 @@ fitMEModels_LOFO_Pred <- function(DT_1_Filt_List,genoDat_List,traits,KG = NULL,K
 	  } # folds
 	} # reps
 
+	# Average VarComp across folds (each element is a data frame with numeric cols)
+	.avg_vcomp <- function(lst) {
+	  if (length(lst) == 1L) return(lst[[1]])
+	  num_cols <- sapply(lst[[1]], is.numeric)
+	  out <- lst[[1]]
+	  for (i in seq_along(lst)[-1]) out[, num_cols] <- out[, num_cols] + lst[[i]][, num_cols]
+	  out[, num_cols] <- out[, num_cols] / length(lst)
+	  out
+	}
+
 	# Aggregate correlations and pack return
 	if (!is.null(fit_MM_df_Out)) {
 	  corMM_LOT_CV  <- cor(fit_MM_df_Out$Pred,  fit_MM_df_Out$Obs,  use = "pairwise.complete.obs")
@@ -682,11 +679,14 @@ fitMEModels_LOFO_Pred <- function(DT_1_Filt_List,genoDat_List,traits,KG = NULL,K
 	  corMDe_LOT_CV <- cor(fit_MDe_df_Out$Pred, fit_MDe_df_Out$Obs, use = "pairwise.complete.obs")
 
 	  cor_LOT_CV_List  <- list(MM  = corMM_LOT_CV, MDs = corMDs_LOT_CV, MDe = corMDe_LOT_CV)
-	  var_LOT_CV_List  <- list(MM  = varMM_LOT_CV, MDs = varMDs_LOT_CV, MDe = varMDe_LOT_CV)
+	  var_LOT_CV_List  <- list(MM  = .avg_vcomp(varMM_folds),
+	                           MDs = .avg_vcomp(varMDs_folds),
+	                           MDe = .avg_vcomp(varMDe_folds))
 	  fit_Out_LOT_CV_List <- list(MM = fit_MM_df_Out, MDs = fit_MDs_df_Out, MDe = fit_MDe_df_Out)
 	} else {
+	  corSM_LOT_CV <- cor(fit_SM_df_Out$Pred, fit_SM_df_Out$Obs, use = "pairwise.complete.obs")
 	  cor_LOT_CV_List  <- list(SM = corSM_LOT_CV)
-	  var_LOT_CV_List  <- list(SM = varSM_LOT_CV)
+	  var_LOT_CV_List  <- list(SM = .avg_vcomp(varSM_folds))
 	  fit_Out_LOT_CV_List <- list(SM = fit_SM_df_Out)
 	}
 
@@ -1023,13 +1023,11 @@ getME_CV <- function(DT_1_Filt_List,genoDat_List,traits,KG=NULL,KE=NULL,CVMet,fa
   factInd <- which(IDColsME %in% factVar)
   factVarMod <- factVar
   factVarMod <- IDColsMEMod[factInd]
-  
-##  
-  fixInd <- which(IDColsME %in% fixedME)
-  fixedMEMod <-  IDColsMEMod[fixInd] 
 
-##  
-  ke <- KE
+##
+  fixInd <- which(IDColsME %in% fixedME)
+  fixedMEMod <-  IDColsMEMod[fixInd]
+
   strainGeno <- rownames(genoDat)
 
 ##

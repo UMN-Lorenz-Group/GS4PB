@@ -500,14 +500,19 @@ fitMEModels_LOFO_Pred <- function(DT_1_Filt_List,genoDat_List,traits,KG = NULL,K
 	fit_MDe_df_Out <- NULL
 	fit_SM_df_Out  <- NULL
 
-	# VarComp collectors — accumulate per fold, average after loops
-	varMM_folds  <- list(); varMDs_folds <- list(); varMDe_folds <- list()
-	varSM_folds  <- list()
-	corSM_LOT_CV <- NULL
+	# VarComp collectors — nested by rep; inner lists accumulate per-fold entries
+	varMM_by_rep  <- vector("list", nSampleReps)
+	varMDs_by_rep <- vector("list", nSampleReps)
+	varMDe_by_rep <- vector("list", nSampleReps)
+	varSM_by_rep  <- vector("list", nSampleReps)
 
 	for (sampRepNo in seq_len(nSampleReps)) {
 
 	  DT_lists  <- MaskedData$DT_masked[[sampRepNo]]
+
+	  # Per-rep fold collectors
+	  varMM_folds_r  <- list(); varMDs_folds_r <- list(); varMDe_folds_r <- list()
+	  varSM_folds_r  <- list()
 
 	  for (f in seq_along(DT_lists)) {
 
@@ -586,9 +591,9 @@ fitMEModels_LOFO_Pred <- function(DT_1_Filt_List,genoDat_List,traits,KG = NULL,K
 		  pred_MDs_factr <- fit_MDs$yHat[Test_Idx]
 		  pred_MDe_factr <- fit_MDe$yHat[Test_Idx]
 
-		  varMM_folds[[length(varMM_folds)+1]]   <- fit_MM$VarComp
-		  varMDs_folds[[length(varMDs_folds)+1]] <- fit_MDs$VarComp
-		  varMDe_folds[[length(varMDe_folds)+1]] <- fit_MDe$VarComp
+		  varMM_folds_r [[length(varMM_folds_r)+1]]  <- fit_MM$VarComp
+		  varMDs_folds_r[[length(varMDs_folds_r)+1]] <- fit_MDs$VarComp
+		  varMDe_folds_r[[length(varMDe_folds_r)+1]] <- fit_MDe$VarComp
 
 		  mm_df <- data.frame(
 			UniqID = DT_Out[[uniqid]][Test_Idx],
@@ -649,7 +654,7 @@ fitMEModels_LOFO_Pred <- function(DT_1_Filt_List,genoDat_List,traits,KG = NULL,K
 		  obs_factr   <- DT_Out$Obs[Test_Idx]
 		  pred_SM     <- fit_SM$yHat[Test_Idx]
 
-		  varSM_folds[[length(varSM_folds)+1]] <- fit_SM$VarComp
+		  varSM_folds_r[[length(varSM_folds_r)+1]] <- fit_SM$VarComp
 
 		  sm_df <- data.frame(
 			UniqID = DT_Out[[uniqid]][Test_Idx],
@@ -664,6 +669,13 @@ fitMEModels_LOFO_Pred <- function(DT_1_Filt_List,genoDat_List,traits,KG = NULL,K
 		  fit_SM_df_Out <- rbind(fit_SM_df_Out, sm_df)
 		}
 	  } # folds
+
+	  # Save this rep's fold-level VarComps
+	  varMM_by_rep [[sampRepNo]] <- varMM_folds_r
+	  varMDs_by_rep[[sampRepNo]] <- varMDs_folds_r
+	  varMDe_by_rep[[sampRepNo]] <- varMDe_folds_r
+	  varSM_by_rep [[sampRepNo]] <- varSM_folds_r
+
 	} # reps
 
 	# Average VarComp across folds (each element is a data frame with numeric cols)
@@ -676,21 +688,36 @@ fitMEModels_LOFO_Pred <- function(DT_1_Filt_List,genoDat_List,traits,KG = NULL,K
 	  out
 	}
 
-	# Aggregate correlations and pack return
+	# Per-rep correlation (avoids n-inflation from pooling reps), then mean across reps
+	# Per-rep VarComp: fold-average within each rep, then grand-mean across reps
 	if (!is.null(fit_MM_df_Out)) {
-	  corMM_LOT_CV  <- cor(fit_MM_df_Out$Pred,  fit_MM_df_Out$Obs,  use = "pairwise.complete.obs")
-	  corMDs_LOT_CV <- cor(fit_MDs_df_Out$Pred, fit_MDs_df_Out$Obs, use = "pairwise.complete.obs")
-	  corMDe_LOT_CV <- cor(fit_MDe_df_Out$Pred, fit_MDe_df_Out$Obs, use = "pairwise.complete.obs")
+	  corMM_LOT_CV  <- mean(vapply(seq_len(nSampleReps), function(r) {
+	    rows <- fit_MM_df_Out$Rep == r
+	    cor(fit_MM_df_Out$Pred[rows],  fit_MM_df_Out$Obs[rows],  use = "pairwise.complete.obs")
+	  }, numeric(1)))
+	  corMDs_LOT_CV <- mean(vapply(seq_len(nSampleReps), function(r) {
+	    rows <- fit_MDs_df_Out$Rep == r
+	    cor(fit_MDs_df_Out$Pred[rows], fit_MDs_df_Out$Obs[rows], use = "pairwise.complete.obs")
+	  }, numeric(1)))
+	  corMDe_LOT_CV <- mean(vapply(seq_len(nSampleReps), function(r) {
+	    rows <- fit_MDe_df_Out$Rep == r
+	    cor(fit_MDe_df_Out$Pred[rows], fit_MDe_df_Out$Obs[rows], use = "pairwise.complete.obs")
+	  }, numeric(1)))
 
 	  cor_LOT_CV_List  <- list(MM  = corMM_LOT_CV, MDs = corMDs_LOT_CV, MDe = corMDe_LOT_CV)
-	  var_LOT_CV_List  <- list(MM  = .avg_vcomp(varMM_folds),
-	                           MDs = .avg_vcomp(varMDs_folds),
-	                           MDe = .avg_vcomp(varMDe_folds))
+	  var_LOT_CV_List  <- list(
+	    MM  = .avg_vcomp(lapply(varMM_by_rep,  .avg_vcomp)),
+	    MDs = .avg_vcomp(lapply(varMDs_by_rep, .avg_vcomp)),
+	    MDe = .avg_vcomp(lapply(varMDe_by_rep, .avg_vcomp))
+	  )
 	  fit_Out_LOT_CV_List <- list(MM = fit_MM_df_Out, MDs = fit_MDs_df_Out, MDe = fit_MDe_df_Out)
 	} else {
-	  corSM_LOT_CV <- cor(fit_SM_df_Out$Pred, fit_SM_df_Out$Obs, use = "pairwise.complete.obs")
+	  corSM_LOT_CV <- mean(vapply(seq_len(nSampleReps), function(r) {
+	    rows <- fit_SM_df_Out$Rep == r
+	    cor(fit_SM_df_Out$Pred[rows], fit_SM_df_Out$Obs[rows], use = "pairwise.complete.obs")
+	  }, numeric(1)))
 	  cor_LOT_CV_List  <- list(SM = corSM_LOT_CV)
-	  var_LOT_CV_List  <- list(SM = .avg_vcomp(varSM_folds))
+	  var_LOT_CV_List  <- list(SM = .avg_vcomp(lapply(varSM_by_rep, .avg_vcomp)))
 	  fit_Out_LOT_CV_List <- list(SM = fit_SM_df_Out)
 	}
 

@@ -1,0 +1,750 @@
+---
+title: "GS4PB ME Workflow: Multi-Environment Genomic Prediction"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{GS4PB ME Workflow: Multi-Environment Genomic Prediction}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval = FALSE, echo = TRUE, comment = "#>")
+```
+
+# Overview
+
+This vignette covers the **Multi-Environment (ME) genomic prediction workflow** in
+GS4PB in detail.  It extends the brief ME section of the main pipeline vignette
+with a focus on three advanced use cases that are common in HPC breeding programs:
+
+| Step | Function | Purpose |
+|------|----------|---------|
+| ME Cross-Validation | `getME_CV()` | Estimate predictive ability across environments |
+| Leave-One-Test-Out CV | `fitMEModels_LOFO_Pred(..., maskProp = 1)` | Evaluate prediction into completely new test environments |
+| LOFO Prediction | `fitMEModels_LOFO_Pred(..., maskProp < 1)` | Predict partially-observed test environments |
+
+All code chunks use `eval = FALSE` because the pipeline requires real genotype and
+phenotype files.  Replace every `<...>` placeholder before running.
+
+The workflow is designed to run on an **HPC cluster** using `foreach %dopar%` to
+parallelize prediction across multiple factor levels (e.g., year × test
+combinations).
+
+---
+
+# 1 — HPC Setup
+
+When running on a cluster that uses environment modules, load the required system
+libraries before starting R.  The exact module names vary by cluster; the example
+below reflects a typical SLURM / Rocky8 setup.
+
+```{r hpc-modules, engine="bash"}
+## HPC module loads (run in your job script or interactive session)
+## Adjust module names to match your cluster's module system
+module load udunits
+module load gdal
+module load proj
+module load netcdf
+module load geos
+module load R/4.4.2-openblas-rocky8
+R
+```
+
+```{r libs}
+## Set Java heap size BEFORE loading rJava — cannot be changed after JVM starts
+options(java.parameters = "-Xmx30g")
+
+library(rJava)
+library(rTASSEL)
+library(GS4PB)
+library(dplyr)
+library(foreach)
+library(doParallel)
+
+## Start the TASSEL logger (suppresses verbose Java output to console)
+rTASSEL::startLogger()
+```
+
+---
+
+# 2 — Define Paths and Parameters
+
+```{r inputs}
+## ── File paths ──────────────────────────────────────────────────────────────
+vcf_path      <- "<path/to/genotype.vcf>"
+me_pheno_path <- "<path/to/me_phenotype.csv>"
+out_dir       <- "<path/to/output_directory>"
+
+## ── Genotype QC parameters ──────────────────────────────────────────────────
+MAF_thresh       <- 0.02    # minor allele frequency threshold
+site_call_rate   <- 0.80    # minimum proportion of non-missing calls per site
+taxa_min_called  <- 0.90    # minimum proportion of non-missing calls per taxon
+
+## ── Trait and column name mapping ───────────────────────────────────────────
+## Traits to analyse — one or more column names in the phenotype file
+trait_me    <- c("Yield")
+
+## Column in the phenotype file that identifies each genotype/strain
+strain_col  <- "Strain"
+
+## Column used as the environmental grouping variable (e.g., "Env", "Loc")
+env_col     <- "Env"
+
+## Location and year columns — set to NULL if not present
+loc_col     <- "Loc"    # or NULL
+yr_col      <- "Year"   # or NULL
+
+## Column containing the unique observation ID (strain × environment key)
+## Used internally for data alignment; e.g., "UniqID", "StrLocTst"
+id_col_me   <- "UniqID"
+
+## Fixed effect to include in ME models — typically the environment variable
+fix_me      <- "Env"
+
+## ── ME model parameters ─────────────────────────────────────────────────────
+## Kernel method: "Linear" (GB) builds a linear genomic kernel;
+##                "Gaussian" (GK) builds a Gaussian kernel — often more flexible
+k_method    <- "GK"
+
+## Scope filters: "All" uses all locations / years; or supply a character vector
+loc_me      <- "All"
+yr_me       <- "All"
+
+## ── Bayesian MCMC parameters (BGGE backend) ─────────────────────────────────
+bys_iter   <- 10000
+bys_burnin <- 2000
+bys_thin   <- 5
+
+## ── Cross-validation parameters ─────────────────────────────────────────────
+k_folds <- 5    # number of CV folds
+n_iter  <- 5    # number of CV replicates
+cv_met  <- "CV0"  # "CV1" (novel genotypes), "CV2" (novel GxE cells),
+                  # "CV0" (novel environments), "CV00" (novel geno x novel env)
+
+## ── LOFO / LOTCV factor setup ────────────────────────────────────────────────
+## Column whose levels are used as the leave-one-out factor
+## A common choice is a composite year × test label, e.g., "2025-T1"
+factor_col <- "YrTst"
+
+## Number of parallel workers for the foreach loop
+n_workers  <- 10
+```
+
+---
+
+# 3 — Genotype Processing
+
+Genotype processing is shared across all GS4PB workflows.  See the main vignette
+(`vignette("GS4PB_Pipeline")`) for a full description.  The steps below are
+reproduced for self-contained reference.
+
+## 3a — Load VCF
+
+`getTasObj()` reads the VCF into JVM memory via rTASSEL.
+`getGenoTas_to_DF()` converts it to an R data frame coded in 0/1/2 format.
+
+```{r load-vcf}
+tas     <- getTasObj(vcf_path)
+geno_df <- getGenoTas_to_DF(tas)
+cat(getGenoQCStats(geno_df))
+## Reports: number of genotypes, number of markers, % missing
+```
+
+## 3b — Filter Markers (Filt1)
+
+Remove SNPs below the MAF threshold or with a low site call rate.
+`siteMinCnt` expects an **integer count**, not a proportion — multiply by the
+number of markers and round to avoid rTASSEL segmentation faults.
+
+```{r filt1}
+n_markers <- ncol(geno_df) - 5L   # subtract non-marker columns
+
+tas_filt1  <- getFilteredSitesGenoData(tas,
+                siteMinCnt = round(site_call_rate * n_markers),
+                MAF        = MAF_thresh)
+geno_filt1 <- getGenoTas_to_DF(tas_filt1)
+cat(getGenoQCStatsFilt1(geno_df, geno_filt1,
+                        missSitesTH = 1 - site_call_rate,
+                        MAFTH       = MAF_thresh))
+```
+
+## 3c — Filter Samples (Filt2)
+
+Remove individuals with high missingness across retained markers.
+
+```{r filt2}
+tas_filt2  <- getFilteredTaxaGenoData(tas_filt1,
+                MinNotMissing = taxa_min_called)
+geno_filt2 <- getGenoTas_to_DF(tas_filt2)
+cat(getGenoQCStatsFilt2(geno_filt1, geno_filt2,
+                        missIndTH = 1 - taxa_min_called))
+```
+
+## 3d — Imputation
+
+Choose **one** method.  LD-KNNi generally performs better than numeric
+imputation when the dataset is large and has low to moderate missingness.
+
+```{r impute}
+## Option A: Numeric (mean) imputation — fast, suitable for low missingness
+# tas_imp  <- getImputedData_Num(tas_filt2, nN = 5, Dist = "Euclidean")
+# geno_imp <- getGenoTas_to_DF(tas_imp)
+
+## Option B: LD-KNNi imputation via rTASSEL — more accurate, slower
+tas_imp  <- getImputedData_LDKNNI(tas_filt2, l = 30, k = 10)
+geno_imp <- getGenoTas_to_DF(tas_imp)
+
+cat(getGenoQCStats(geno_imp))
+## Should report 0% missing after imputation
+```
+
+---
+
+# 4 — ME Phenotype Setup
+
+## 4a — Load and Clean the Phenotype File
+
+The ME phenotype CSV must have **one row per observation** (strain × environment).
+Required columns: strain ID, environment, trait value(s).  Optional: Loc, Year.
+
+```{r me-pheno-load}
+pheno_me_raw <- read.csv(me_pheno_path, stringsAsFactors = FALSE)
+
+## Strip any prefix added by export tools (e.g., "predicted.value." from ASReml)
+colnames(pheno_me_raw) <- gsub("predicted\\.value\\.", "", colnames(pheno_me_raw))
+
+## Remove rows with missing Test labels or any unwanted test identifiers
+## Adjust the pattern to match entries you wish to exclude
+exclude_idx <- grep("^NA$|^$", pheno_me_raw$Test)
+if (length(exclude_idx) > 0) {
+  pheno_me_raw <- pheno_me_raw[-exclude_idx, ]
+}
+```
+
+## 4b — Create Composite Factor Column
+
+A composite year × test label is useful for leave-one-test-out analyses.
+This column (`factor_col`) becomes the grouping variable for the LOFO loop.
+
+```{r factor-col}
+## Paste Year and Test (or any two columns) to create a unique factor level
+## per year × test combination — e.g., "2025-T1", "2024-T2"
+pheno_me_raw[[factor_col]] <- paste(pheno_me_raw$Year,
+                                    pheno_me_raw$Test,
+                                    sep = "-")
+```
+
+## 4c — Identify ID and Trait Columns
+
+```{r id-cols}
+## All columns that are NOT trait values are treated as ID / metadata columns
+id_cols_me <- colnames(pheno_me_raw)[!colnames(pheno_me_raw) %in% trait_me]
+```
+
+## 4d — Standardise Column Names
+
+`stdizePhVarNames()` remaps user-supplied column names to the internal names
+(`env`, `gid`, `uniqID`) expected by all downstream ME functions.
+
+```{r standardise}
+std_out     <- stdizePhVarNames(pheno_me_raw,
+                 IDColsME    = id_cols_me,
+                 StrainME    = strain_col,
+                 EnvVarME    = env_col,
+                 LocMEColVar = loc_col,
+                 YrMEColVar  = yr_col)
+
+pheno_me_mod <- std_out[[1]]   # standardised phenotype data frame
+id_cols_mod  <- std_out[[2]]   # updated ID column vector (with renamed entries)
+env_var_mod  <- std_out[[3]]   # standardised environment variable name
+```
+
+## 4e — Format into Per-Trait Data Frames
+
+`getPhenoMEData()` splits the phenotype table into a list of per-trait data
+frames.  Each element is a long-format table with columns `env`, `gid`,
+`value`, and the metadata columns from `id_cols_mod`.
+
+```{r me-pheno-format}
+pheno_me_fmt <- getPhenoMEData(
+  PhenoME    = pheno_me_mod,
+  TraitME    = trait_me,
+  nSelTraits = length(trait_me),
+  IDColsME   = id_cols_mod,
+  StrainME   = strain_col
+)
+```
+
+## 4f — Merge Genotype and Phenotype
+
+`getMergedDataME()` aligns strain IDs across the genotype matrix and each
+per-trait phenotype table.  Only strains present in both are retained.
+
+```{r me-merge}
+merged_me <- getMergedDataME(phData    = pheno_me_fmt,
+                              genoImp   = geno_imp,
+                              TargetIDs = NULL)
+
+DT_list   <- merged_me[[1]]   # list of phenotype data frames, one per trait
+geno_list <- merged_me[[2]]   # list of genotype matrices, one per trait
+
+cat("Genotypes in merged data:", length(unique(DT_list[[1]]$Strain)), "\n")
+```
+
+---
+
+# 5 — ME Cross-Validation
+
+`getME_CV()` fits multi-environment BGGE models under a chosen CV scheme and
+returns fold-level predictions and variance components.
+
+**CV schemes:**
+
+| `CVMet` | Scenario tested |
+|---------|----------------|
+| `"CV1"` | Novel genotypes in observed environments (hardest) |
+| `"CV2"` | Observed genotypes in partially-observed environments |
+| `"CV0"` | Novel (held-out) environments |
+| `"CV00"` | Novel genotypes × novel environments |
+| `"CV_LOFO"` | Leave-one-factor-level-out (e.g., one location) |
+
+```{r me-cv}
+## Register parallel backend for the within-CV fold loop
+registerDoParallel(n_workers)
+
+cv_me <- getME_CV(
+  DT_1_Filt_List = DT_list,
+  genoDat_List   = geno_list,
+  traits         = trait_me,
+  KG             = NULL,           # NULL = G matrix estimated internally
+  KE             = NULL,           # NULL = no environmental kernel
+  CVMet          = cv_met,
+  factVar        = env_var_mod,
+  K              = k_folds,
+  NIter          = n_iter,
+  KMethod        = k_method,       # "Linear" (GB) or "Gaussian" (GK)
+  FitEnvModels   = FALSE,          # TRUE only when KE is provided
+  fixedME        = fix_me,
+  envVar         = env_var_mod,
+  IDColsME       = id_cols_mod,
+  IDColME        = id_col_me,
+  LocME          = loc_me,
+  YrME           = yr_me,
+  b_iter         = bys_iter,
+  b_burnin       = bys_burnin,
+  b_thin         = bys_thin
+)
+
+## cv_me$results[[trait_idx]] contains per-rep, per-fold predictions
+## and variance components for models MM, MDs, MDe (and SM for single-env folds)
+cv_me_fit <- cv_me$results[[1]]
+```
+
+---
+
+# 6 — Leave-One-Test-Out Cross-Validation (LOTCV)
+
+LOTCV asks: *"How well does the model predict an entirely new test environment,
+given data from all other environments?"*
+
+`fitMEModels_LOFO_Pred()` with `maskProp = 1` fully removes all observations
+from `maskFactrLev` before fitting, then predicts them.  Running one call per
+target factor level (parallelised over test sets) produces a complete LOTCV
+assessment.
+
+## 6a — Identify Target Factor Levels
+
+```{r lotcv-setup}
+## All unique levels of the composite factor column (e.g., "2025-T1", "2025-T2")
+all_factor_levels    <- unique(DT_list[[1]][[factor_col]])
+
+## Subset to the levels you want to predict — here, those from a specific year
+target_factor_levels <- grep("2025", all_factor_levels, value = TRUE)
+n_targets            <- length(target_factor_levels)
+
+cat("Factor levels to predict:", n_targets, "\n")
+print(target_factor_levels)
+```
+
+## 6b — Run LOTCV in Parallel
+
+Each parallel task masks one factor level completely (`maskProp = 1`), fits
+MM / MDs / MDe models on the remaining data, and returns predictions for the
+held-out level.
+
+`withCallingHandlers` captures convergence warnings without aborting the job;
+`tryCatch` catches hard errors and returns `NULL` for that level so the loop
+continues.
+
+```{r lotcv-run}
+registerDoParallel(n_workers)
+
+lotcv_results <- foreach(
+  i = seq_len(n_targets),
+  .packages = c("GS4PB")
+) %dopar% {
+  tryCatch({
+    withCallingHandlers({
+
+      GS4PB::fitMEModels_LOFO_Pred(
+        DT_1_Filt_List = DT_list,
+        genoDat_List   = geno_list,
+        traits         = trait_me,
+        KG             = NULL,
+        KE             = NULL,
+        factrVar       = factor_col,
+        maskFactrLev   = target_factor_levels[i],   # mask this level entirely
+        maskProp       = 1,                          # 1 = full leave-one-out
+        nSampleReps    = 1,
+        KMethod        = k_method,
+        fixedME        = fix_me,
+        envVar         = env_var_mod,
+        IDColsME       = id_cols_mod,
+        IDColME        = id_col_me,
+        LocME          = loc_me,
+        YrME           = yr_me,
+        b_iter         = bys_iter,
+        b_burnin       = bys_burnin,
+        b_thin         = bys_thin
+      )
+
+    }, warning = function(w) {
+      ## Capture but do not abort on convergence warnings
+      msg <- conditionMessage(w)
+      message("Warning [", target_factor_levels[i], "]: ", msg)
+      invokeRestart("muffleWarning")
+    })
+  }, error = function(e) {
+    message("Error [", target_factor_levels[i], "]: ", e$message)
+    NULL   # return NULL for this level; downstream code handles it
+  })
+}
+
+names(lotcv_results) <- target_factor_levels
+```
+
+## 6c — Summarise LOTCV Predictive Ability
+
+`getCombinedTab()` merges predictions from all three models (MM, MDs, MDe) and
+observed values into a single wide data frame per factor level.
+
+```{r lotcv-summary}
+n_trait <- 1   # index of the trait within trait_me (1 = first trait)
+
+lotcv_env_cor <- do.call(rbind, lapply(seq_len(n_targets), function(i) {
+
+  res <- lotcv_results[[i]]
+  if (is.null(res)) return(NULL)   # skip levels that errored
+
+  combined <- getCombinedTab(
+    outputListME = res,
+    TraitME      = trait_me,
+    IDColsME     = id_cols_mod,
+    IDColME      = id_col_me,
+    envVar       = env_var_mod,
+    fitEnvCov    = FALSE,
+    reaction     = FALSE
+  )
+
+  ## Column names follow the pattern "<Trait>Pred-<Model>" and "<Trait>Obs-<Model>"
+  trait  <- trait_me[n_trait]
+  cor_tab <- combined %>%
+    group_by(Env) %>%
+    summarise(
+      Cor_MM  = cor(get(paste0(trait, "Pred-MM")),
+                    get(paste0(trait, "Obs-MM")),  use = "pairwise.complete.obs"),
+      Cor_MDs = cor(get(paste0(trait, "Pred-MDs")),
+                    get(paste0(trait, "Obs-MDs")), use = "pairwise.complete.obs"),
+      Cor_MDe = cor(get(paste0(trait, "Pred-MDe")),
+                    get(paste0(trait, "Obs-MDe")), use = "pairwise.complete.obs"),
+      .groups = "drop"
+    )
+
+  cor_tab$FactorLevel <- target_factor_levels[i]
+  cor_tab
+}))
+
+print(lotcv_env_cor)
+```
+
+---
+
+# 7 — LOFO Prediction with Partial Masking
+
+LOFO prediction (`maskProp < 1`) is appropriate when **some** observations from
+the target environment are available for training — for example, early-season
+data exist but the full harvest is not yet recorded.  The partial-masking regime
+samples `maskProp` of observations as test, fits on the rest, and repeats
+`nSampleReps` times to average out sampling variance.
+
+## 7a — Run LOFO Prediction in Parallel
+
+```{r lofo-run}
+n_sample_reps <- 10   # number of partial-mask replicates per factor level
+mask_prop     <- 0.5  # proportion of observations masked as test set
+
+registerDoParallel(n_workers)
+
+lofo_pred_results <- foreach(
+  i = seq_len(n_targets),
+  .packages = c("GS4PB")
+) %dopar% {
+  tryCatch({
+    withCallingHandlers({
+
+      GS4PB::fitMEModels_LOFO_Pred(
+        DT_1_Filt_List = DT_list,
+        genoDat_List   = geno_list,
+        traits         = trait_me,
+        KG             = NULL,
+        KE             = NULL,
+        factrVar       = factor_col,
+        maskFactrLev   = target_factor_levels[i],
+        maskProp       = mask_prop,        # partial masking
+        nSampleReps    = n_sample_reps,    # repeat n times, average predictions
+        KMethod        = k_method,
+        fixedME        = fix_me,
+        envVar         = env_var_mod,
+        IDColsME       = id_cols_mod,
+        IDColME        = id_col_me,
+        LocME          = loc_me,
+        YrME           = yr_me,
+        b_iter         = bys_iter,
+        b_burnin       = bys_burnin,
+        b_thin         = bys_thin
+      )
+
+    }, warning = function(w) {
+      msg <- conditionMessage(w)
+      message("Warning [", target_factor_levels[i], "]: ", msg)
+      invokeRestart("muffleWarning")
+    })
+  }, error = function(e) {
+    message("Error [", target_factor_levels[i], "]: ", e$message)
+    NULL
+  })
+}
+
+names(lofo_pred_results) <- target_factor_levels
+```
+
+## 7b — Average Predictions Across Sampling Replicates
+
+For each factor level, average the replicated predictions from each model across
+`nSampleReps` iterations, then join MM, MDs, MDe into a single table.
+
+```{r lofo-avg}
+n_trait    <- 1        # trait index
+trait_name <- trait_me[n_trait]
+
+avg_pred_list   <- vector("list", n_targets)
+env_cor_list    <- vector("list", n_targets)
+best_model_list <- vector("list", n_targets)
+
+for (i in seq_len(n_targets)) {
+
+  res <- lofo_pred_results[[i]]
+  if (is.null(res)) next
+
+  ## Average each model's predictions across sampling replicates
+  ## res$preds[[trait_idx]]$MM  is a data frame with cols: Strain, Env, Pred, Obs, Rep
+  avg_MM  <- res$preds[[n_trait]]$MM  %>%
+    group_by(Strain, Env) %>%
+    summarise(Pred.MM  = mean(Pred, na.rm = TRUE),
+              Obs      = mean(Obs,  na.rm = TRUE), .groups = "drop")
+
+  avg_MDs <- res$preds[[n_trait]]$MDs %>%
+    group_by(Strain, Env) %>%
+    summarise(Pred.MDs = mean(Pred, na.rm = TRUE), .groups = "drop")
+
+  avg_MDe <- res$preds[[n_trait]]$MDe %>%
+    group_by(Strain, Env) %>%
+    summarise(Pred.MDe = mean(Pred, na.rm = TRUE), .groups = "drop")
+
+  ## Join all three model predictions into one table
+  avg_tab <- avg_MM %>%
+    inner_join(avg_MDs, by = c("Strain", "Env")) %>%
+    inner_join(avg_MDe, by = c("Strain", "Env"))
+
+  ## Rename to interpretable model names
+  ## MM  = G + E (main effects only)
+  ## MDs = G + E + GxE (single variance component for GxE)
+  ## MDe = G + E + GxEi (environment-specific GxE variance)
+  colnames(avg_tab) <- c("Strain", "Env", "G+E", "Obs", "G+E+GxE", "G+E+GxEi")
+
+  avg_tab$FactorLevel <- target_factor_levels[i]
+  avg_pred_list[[i]]  <- avg_tab
+
+  ## Compute per-environment correlations for each model
+  cor_tab <- avg_tab %>%
+    group_by(FactorLevel, Env) %>%
+    summarise(
+      Cor_MM  = cor(`G+E`,       Obs, use = "pairwise.complete.obs"),
+      Cor_MDs = cor(`G+E+GxE`,  Obs, use = "pairwise.complete.obs"),
+      Cor_MDe = cor(`G+E+GxEi`, Obs, use = "pairwise.complete.obs"),
+      .groups = "drop"
+    )
+
+  colnames(cor_tab) <- c("FactorLevel", "Env", "G+E", "G+E+GxE", "G+E+GxEi")
+  env_cor_list[[i]] <- cor_tab
+
+  ## Identify the best-performing model per environment
+  if (nrow(cor_tab) > 1) {
+    best_mod <- apply(cor_tab, 1,
+                      function(x) names(x[3:5])[which.max(as.numeric(x[3:5]))])
+  } else {
+    best_mod <- names(cor_tab[3:5])[which.max(cor_tab[3:5])]
+  }
+  names(best_mod)        <- cor_tab$Env
+  best_model_list[[i]]   <- best_mod
+}
+```
+
+## 7c — Build Final Prediction Table Using Best Model per Environment
+
+For each environment, select the predictions from whichever model had the
+highest correlation.  If no valid correlation exists (e.g., all-NA environment),
+fall back to the average of MM and MDs.
+
+```{r lofo-final-table}
+final_pred_table <- c()
+
+for (i in seq_along(avg_pred_list)) {
+
+  avg_tab <- avg_pred_list[[i]]
+  if (is.null(avg_tab)) next
+
+  envs    <- as.character(unique(avg_tab$Env))
+  out     <- c()
+
+  for (env in envs) {
+
+    best_mod_env <- as.character(best_model_list[[i]][env])
+    x_env        <- avg_tab[avg_tab$Env == env, ]
+
+    if (best_mod_env != "character(0)" && best_mod_env %in% colnames(x_env)) {
+      ## Use the single best model prediction for this environment
+      out_env              <- x_env[, c("Strain", "Obs", best_mod_env,
+                                        "FactorLevel", "Env")]
+      colnames(out_env)    <- c("Strain", "Obs", "Pred", "FactorLevel", "Env")
+    } else {
+      ## Fallback: average MM and MDs predictions
+      mod_cols  <- which(colnames(x_env) %in% c("G+E", "G+E+GxE"))
+      avg_preds <- apply(x_env[, mod_cols], 1, function(r) mean(as.numeric(r)))
+      out_env   <- cbind(x_env[, c("Strain", "Obs")],
+                         Pred        = avg_preds,
+                         FactorLevel = x_env$FactorLevel,
+                         Env         = x_env$Env)
+    }
+
+    out <- rbind(out, out_env)
+  }
+
+  final_pred_table <- rbind(final_pred_table, out)
+}
+
+## Summary: best-model correlation per environment
+final_env_cor <- final_pred_table %>%
+  group_by(Env) %>%
+  summarise(Cor_BestModel = cor(Obs, Pred, use = "pairwise.complete.obs"),
+            .groups = "drop")
+
+print(final_env_cor)
+```
+
+## 7d — Write Outputs
+
+```{r lofo-write}
+write.csv(final_pred_table,
+          file      = file.path(out_dir, paste0(trait_name, "_LOFO_Predictions.csv")),
+          quote     = FALSE,
+          row.names = FALSE)
+
+write.csv(final_env_cor,
+          file      = file.path(out_dir, paste0(trait_name, "_LOFO_EnvCor.csv")),
+          quote     = FALSE,
+          row.names = FALSE)
+
+cat("Results written to:", out_dir, "\n")
+```
+
+---
+
+# 8 — Multi-Trait Extension
+
+The ME workflow can be repeated for additional traits.  Traits may differ in how
+the environment is defined — for example, a maturity rating may be grouped by
+**location** rather than by environment × year.  Simply re-run Sections 4–7
+with a new set of column-name mappings.
+
+```{r multi-trait}
+## ── Second trait example: trait grouped by location ─────────────────────────
+
+trait_me_2   <- c("Maturity")       # trait column in the phenotype file
+env_col_2    <- "Loc"               # environment grouping for this trait
+loc_col_2    <- "Loc"
+fix_me_2     <- "Env"
+
+## Exclude this trait's column from the ID column list
+id_cols_me_2 <- colnames(pheno_me_raw)[!colnames(pheno_me_raw) %in% trait_me_2]
+## Also exclude columns belonging to other traits to keep ID columns clean
+id_cols_me_2 <- grep("Maturity", id_cols_me_2, invert = TRUE, value = TRUE)
+
+std_out_2    <- stdizePhVarNames(pheno_me_raw,
+                  IDColsME    = id_cols_me_2,
+                  StrainME    = strain_col,
+                  EnvVarME    = env_col_2,
+                  LocMEColVar = loc_col_2,
+                  YrMEColVar  = yr_col)
+
+pheno_me_mod_2 <- std_out_2[[1]]
+id_cols_mod_2  <- std_out_2[[2]]
+env_var_mod_2  <- std_out_2[[3]]
+
+pheno_me_fmt_2 <- getPhenoMEData(
+  PhenoME    = pheno_me_mod_2,
+  TraitME    = trait_me_2,
+  nSelTraits = length(trait_me_2),
+  IDColsME   = id_cols_mod_2,
+  StrainME   = strain_col
+)
+
+merged_me_2 <- getMergedDataME(phData    = pheno_me_fmt_2,
+                                genoImp   = geno_imp,
+                                TargetIDs = NULL)
+DT_list_2   <- merged_me_2[[1]]
+geno_list_2 <- merged_me_2[[2]]
+
+## Re-run Sections 6–7 substituting:
+##   DT_list   → DT_list_2
+##   geno_list → geno_list_2
+##   trait_me  → trait_me_2
+##   id_cols_mod  → id_cols_mod_2
+##   env_var_mod  → env_var_mod_2
+##   fix_me       → fix_me_2
+## All other parameters (k_method, bys_iter, etc.) remain the same.
+```
+
+---
+
+# 9 — Tips for HPC Runs
+
+**Memory:**  Set `options(java.parameters = "-Xmx30g")` *before* `library(rJava)`.
+Changing it afterwards has no effect.
+
+**Parallelism:**  `registerDoParallel(n_workers)` on a SLURM cluster should match
+the `--cpus-per-task` value in your job script to avoid over-subscribing cores.
+
+**BGGE convergence:**  Increase `bys_iter` and decrease `bys_thin` if you see
+repeated convergence warnings.  A minimum of `iter = 10000, burnin = 2000,
+thin = 5` is recommended for ME models.
+
+**Marker matrix:**  Pass `KG = G_tuned` (pre-computed G matrix) to
+`getME_CV()` and `fitMEModels_LOFO_Pred()` when the same genotype set is
+analysed across multiple traits.  This avoids redundant G matrix computation
+inside each parallel worker.
+
+**Null results:**  If `lofo_pred_results[[i]]` is `NULL`, the worker hit an
+error (printed to stderr).  Check that all levels in `target_factor_levels` are
+present in `DT_list[[1]][[factor_col]]` and that each level has at least two
+environments in the training set.

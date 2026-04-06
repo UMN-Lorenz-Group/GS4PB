@@ -6,3 +6,7 @@ App/Misc/
 
 ## IGnore GSOld SCripts
 GSPipeline_OldScripts/
+
+## Ignore Claude Code files
+CLAUDE.md
+.claude/

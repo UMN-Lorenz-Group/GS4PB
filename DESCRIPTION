@@ -17,7 +17,7 @@ Imports: BGGE, BGLR, bWGR, callr, config, doParallel, dplyr, DT,
         terra, tools, utils, vcfR, shinydashboard,
         ASRgenomics, future, promises
 Suggests: attachment, desc, devtools, knitr, rhub, rmarkdown,
-        rsconnect, rstudioapi, usethis
+        rsconnect, rstudioapi, usethis, dplyr
 VignetteBuilder: knitr
 Encoding: UTF-8
 RoxygenNote: 7.3.2

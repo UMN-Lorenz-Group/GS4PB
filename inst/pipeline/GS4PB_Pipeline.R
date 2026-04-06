@@ -135,21 +135,11 @@ pred_data  <- getPredictionData(proc_data, noCandidates = n_cand)
 ## 2e — (Optional) Training Set Optimization via Genetic Algorithm -------------
 # Uncomment to use STPGA to select an optimal training subset.
 
-## Single-objective (errorstat = 1 value) — uses GenAlgForSubsetSelection
 # ga_params <- list(
-#   errorstat    = "MSE", InitPop = NULL, npop = 50, nelite = 5,
+#   errorstat = "MSE", InitPop = NULL, npop = 50, nelite = 5,
 #   mutprob = 0.01, mutintensity = 1, niterations = 100,
 #   minitbefstop = 10, tabu = FALSE, tabumemsize = 5,
 #   plotiters = FALSE, lambda = 0.5, mc.cores = 2
-# )
-#
-## Multi-objective (errorstat = vector, length > 1) — uses GenAlgForSubsetSelectionMO
-# ga_params <- list(
-#   errorstat           = c("PEVmean", "meanCD"),
-#   selectionstatstypes = c("min", "min"),   # "min" or "max" per stat
-#   plotdirections      = c("min", "min"),
-#   InitPop = NULL, npop = 100, mutprob = 0.8, mutintensity = 1,
-#   niterations = 500, plotiters = FALSE, lambda = 1e-6, mc.cores = 2
 # )
 # n_train_select <- 80   # number of lines to select
 #
@@ -316,5 +306,7 @@ me_combined <- getCombinedTab(
 )
 writeGPOutTable(me_combined, type = "ME", outDirPath = out_dir)
 cat("Pipeline complete. Results written to:", out_dir, "\n")
+
+
 
 

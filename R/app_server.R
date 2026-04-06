@@ -27,7 +27,7 @@
 
 app_server <- function(input, output, session) {
 
-  future::plan(future::multisession, workers = 4)
+  rTASSEL::startLogger(fullPath = NULL, fileName = NULL)
 
   # Allow the user to select directories from the home directory or root
   #
@@ -121,20 +121,18 @@ app_server <- function(input, output, session) {
                      id = "vcf_stats", duration = NULL,
                      type = "message", session = session)
 
-    # Step 2 (async): QC stats are pure-R on the DF — offload to worker
-    future_promise({
-      getGenoQCStats(dfmt)
-    }) %...>% (function(qc) {
+    # Step 2: QC stats are pure-R on the DF — compute synchronously
+    tryCatch({
+      qc <- getGenoQCStats(dfmt)
       genoLoadMsg(qc)
       removeNotification("vcf_stats")
       showNotification("Genotype stats ready.", type = "message",
                        duration = 3, session = session)
-    }) %...!% (function(e) {
+    }, error = function(e) {
       genoLoadMsg(paste("Error computing QC stats:", e$message))
       removeNotification("vcf_stats")
       showNotification(e$message, type = "error", duration = NULL, session = session)
     })
-    NULL
   })
 
   # GenoTas: use the cached TASSEL object from the observer (no second VCF read).

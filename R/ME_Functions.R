@@ -1507,7 +1507,7 @@ getME_CV <- function(DT_1_Filt_List,genoDat_List,traits,KG=NULL,KE=NULL,CVMet,fa
 	}
 
   stop("Unknown CVMet. Use one of: 'CV1', 'CV2', 'CV0', 'CV00'.'CV_LOFO'")
-} 
+}
 
 
 
@@ -2066,10 +2066,15 @@ metrics_summary$model <- factor(level_mapping_mod[metrics_summary$model])
   
   if (!is.null(KG)) method <- NULL
 
-# backend — explicit cluster avoids the doSNOW/.doSnowGlobals code path
-cl_par <- makeCluster(min(max(detectCores() - 1, 1), 10))
-registerDoParallel(cl_par)
-on.exit(stopCluster(cl_par), add = TRUE)
+# backend — Unix forks (no cluster overhead); Windows needs a PSOCK cluster
+n_workers <- min(max(parallel::detectCores() - 1, 1), 10)
+if (.Platform$OS.type == "unix") {
+  registerDoParallel(n_workers)
+} else {
+  cl_par <- makeCluster(n_workers)
+  registerDoParallel(cl_par)
+  on.exit(stopCluster(cl_par), add = TRUE)
+}
 
 # figure out folds per replication (robust even if they vary)
 nFolds_by_rep <- vapply(Dat_Out$DT_masked, length, integer(1))
@@ -2085,7 +2090,7 @@ idx <- as.data.frame(idx)
 # run all tasks in parallel
  task_results <- foreach(k = seq_len(nrow(idx)),
                         .packages=c("BGGE","BGLR"),
-                        .export = c("fit_kernel_models","get_kinship_kernels")
+                        .export = c("fit_DTfold","fit_kernel_models","get_kinship_kernels")
                        
   ) %dopar% {
   

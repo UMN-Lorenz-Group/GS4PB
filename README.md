@@ -13,8 +13,8 @@
 | [II](#ii-installing-and-using-the-gs4pb-r-package) | **GS4PB R Package** | Install the package in R; run the Shiny app or use functions programmatically in scripts / HPC pipelines |
 | [III](#iii-running-the-app-on-an-hpc-cluster-singularity--apptainer) | **HPC (Singularity / Apptainer)** | Run the containerised Shiny app on an HPC cluster |
 | [IV](#iv-cyverse-implementation) | **CyVerse** | CyVerse cloud implementation *(details coming soon)* |
-| — | [**Trial Data**](#trial-data) | Download example SE and ME datasets |
 | [V](#v-detailed-documentation) | **Detailed Documentation** | Full wiki and function reference |
+| — | [**Trial Data**](#trial-data) | Download example SE and ME datasets |
 
 ---
 
@@ -132,21 +132,6 @@ file.edit(system.file("pipeline", "GS4PB_Pipeline.R", package = "GS4PB"))
 
 ---
 
-### Trial Data 
-1. Trial data for single environmental trial can be found here:
-
-   https://data.cyverse.org/dav-anon/iplant/home/umnlorenzgroup/SingleEnv_Trial_Data.zip
-   
-   This folder contains three files: genotypic data file in VCF format, a '.csv' file
-   containing target line IDs and a phenotypic data file in '.csv' format. 
-
-3. Trial data for multi-environmental trials can be found here:
-
-   https://data.cyverse.org/dav-anon/iplant/home/umnlorenzgroup/MultiEnv_Trial_Data.zip 
-
-   The multi-environmental trial data folder contains three files: a genotypic data file in VCF format, a phenotypic data file in '.csv' format and
-   location coordinates file for retrieving enviromics (weather) data 
-
 ### III. Running the App on an HPC Cluster (Singularity / Apptainer)
 
 For users with access to an HPC cluster, GS4PB can be run as a containerised
@@ -191,14 +176,24 @@ directory for container home, tmp, and results.
 
 ---
 
+### Trial Data 
+1. Trial data for single environmental trial can be found here:
+
+   https://data.cyverse.org/dav-anon/iplant/home/umnlorenzgroup/SingleEnv_Trial_Data.zip
+   
+   This folder contains three files: genotypic data file in VCF format, a '.csv' file
+   containing target line IDs and a phenotypic data file in '.csv' format. 
+
+2. Trial data for multi-environmental trials can be found here:
+
+   https://data.cyverse.org/dav-anon/iplant/home/umnlorenzgroup/MultiEnv_Trial_Data.zip 
+
+   The multi-environmental trial data folder contains three files: a genotypic data file in VCF format, a phenotypic data file in '.csv' format and
+   location coordinates file for retrieving enviromics (weather) data 
+
+---
+
 ### V. Detailed Documentation
 
 For more information, refer to the wiki page:  
 [GS4PB Wiki Documentation](https://github.com/UMN-Lorenz-Group/GS4PB/wiki)
-
----
-## Introduction
-
-# GS4PB (Previously SoyGen2 : Science Optimized Yield Gains Across Environments - V2) 
-## An R shiny application to implement a genomic selection pipeline from quality control of genotypic data to making genomic predictions 
-![PipelinePic_for_Wiki_V2](https://github.com/UMN-Lorenz-Group/SoyGen2App/assets/12753252/5e76c000-bf4e-4849-bbad-29df6a6fb22e)

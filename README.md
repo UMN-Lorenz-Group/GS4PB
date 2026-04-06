@@ -47,6 +47,78 @@
 
 ---
 
+### II. Installing and Using the GS4PB R Package
+
+GS4PB can be installed as a standard R package and used either through its Shiny interface or programmatically in R scripts and HPC pipelines.
+
+#### Installation
+
+1. Clone the repository using Git:
+   ```bash
+   git clone https://github.com/UMN-Lorenz-Group/GS4PB.git
+   ```
+
+2. Open RStudio and navigate to the root of the package folder. Ensure `conda` is available (required for AlphaPlantImpute2 imputation):
+   ```R
+   Sys.which("conda")
+   # If empty like "":
+   reticulate::install_miniconda()
+   ```
+
+3. Build and install the package using devtools:
+   ```R
+   devtools::install_deps(dependencies = TRUE)
+   devtools::document()
+   # ℹ Updating GS4PB documentation
+   # ℹ Loading GS4PB
+   # Warning message:
+   #   In nsenv[[f_name]](dirname(ns_path), package) :
+   #   Conda environment not found. Run GS4PB:::setup_python_env() to create it.
+   ### Ignore this warning for now and build the package
+   devtools::build()
+   devtools::install()
+   ```
+
+4. Set up the Python environment (required only for AlphaPlantImpute2 imputation):
+   ```R
+   library(GS4PB)
+   GS4PB:::setup_python_env()   # creates the "GS4PB_CondaEnv" conda environment
+   ```
+
+#### Running the Shiny App
+
+Once installed, launch the interactive Shiny interface:
+```R
+options(java.parameters = "-Xmx30g")   # set BEFORE loading any Java-dependent package
+library(GS4PB)
+GS4PB::run_app()
+```
+Follow the app's guided tabs for sequential pipeline steps.
+
+#### Programmatic / Script Use
+
+GS4PB functions can also be called directly in R scripts — useful for HPC cluster jobs or automated pipelines. Set the Java heap size and initialise rTASSEL before any genotype-loading call:
+```R
+options(java.parameters = "-Xmx30g")   # adjust to available RAM
+library(GS4PB)
+rTASSEL::startLogger(fullPath = NULL, fileName = NULL)
+rTASSEL::initializeTASSEL()
+```
+
+**Workflow Vignettes**
+
+| Workflow | Vignette | Description |
+|----------|----------|-------------|
+| **SE: Single-Environment** | `vignette("GS4PB_Pipeline", package = "GS4PB")` | End-to-end pipeline for single-environment single-trait (SE:ST) and multi-trait (SE:MT) predictions: VCF loading, QC filtering, imputation, optional training-set optimisation, cross-validation, and GEBV ranking. |
+| **ME: Multi-Environment** | `vignette("GS4PB_ME_Workflow", package = "GS4PB")` | Advanced multi-environment workflow for HPC: ME cross-validation (CV0/CV1/CV2/CV00), leave-one-test-out CV (LOTCV), LOFO prediction with partial masking, multi-trait extension. Includes parallel `foreach` patterns and SLURM setup. |
+
+A copy of the raw executable pipeline script (no prose) is also installed with the package:
+```R
+file.edit(system.file("pipeline", "GS4PB_Pipeline.R", package = "GS4PB"))
+```
+
+---
+
 ### Trial Data 
 1. Trial data for single environmental trial can be found here:
 
@@ -62,57 +134,15 @@
    The multi-environmental trial data folder contains three files: a genotypic data file in VCF format, a phenotypic data file in '.csv' format and
    location coordinates file for retrieving enviromics (weather) data 
 
-### II. Installing and Running the Application in RStudio
-
-1. Clone the repository using Git:  
-   ```bash
-   git clone https://github.com/UMN-Lorenz-Group/GS4PB.git
-   ```
-2. Open Rstudio and navigate to the root of the package folder: cd GS4PB/
-3. Installation of this package requires 'conda'. In R
-   ```R
-   Sys.which("conda")
-   # If empty like "",
-   reticulate::install_miniconda()
-   ```
-4. Build and install package in RStudio using the devtools package
-   ```R
-   devtools::install_deps(dependencies = TRUE)
-   devtools::document()
-   # ℹ Updating GS4PB documentation
-   # ℹ Loading GS4PB
-   # Warning message:
-   #   In nsenv[[f_name]](dirname(ns_path), package) :
-   #   Conda environment not found. Run GS4PB:::setup_python_env() to create it.
-   ### Ignore this warning message for the time being and build the package
-   devtools::build()
-   devtools::install()
-   ```
-   On successful install, you will get a warning message: 
-   Warning in fun(libname, pkgname) :
-   Conda environment not found. Run GS4PB:::setup_python_env() to create it.
-
-5. Setup python environment for the GS4PB package
-   ```R
-   library(GS4PB)
-   GS4PB:::setup_python_env()
-   ```
-6. Once this setup is complete, GS4PB shiny app can be run using the following command: 
-   ```R
-   GS4PB::run_app()
-   ```
-7. Follow the app’s guided instructions and move through the tabs for sequential implementation of pipeline steps.
----
-
 ### III. CyVerse Implementation
 (Details to be added.)
 
 ---
 
-### IV. Test the Application on GESIS Notebook Binder
+### IV. Detailed Documentation
 
-- You can test the application by clicking the **'Launch Binder'** icon.  
-  **Note:** Since this is a public demo notebook binder, it may not be frequently updated and could take a while to start.
+For more information, refer to the wiki page:  
+[GS4PB Wiki Documentation](https://github.com/UMN-Lorenz-Group/GS4PB/wiki)
 
 ---
 ## Introduction
@@ -120,9 +150,3 @@
 # GS4PB (Previously SoyGen2 : Science Optimized Yield Gains Across Environments - V2) 
 ## An R shiny application to implement a genomic selection pipeline from quality control of genotypic data to making genomic predictions 
 ![PipelinePic_for_Wiki_V2](https://github.com/UMN-Lorenz-Group/SoyGen2App/assets/12753252/5e76c000-bf4e-4849-bbad-29df6a6fb22e)
-
-### V. Detailed Documentation
-
-For more information, refer to the wiki page:  
-[GS4PB Wiki Documentation](https://github.com/UMN-Lorenz-Group/GS4PB/wiki)
-

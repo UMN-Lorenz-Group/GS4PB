@@ -107,10 +107,10 @@ rTASSEL::initializeTASSEL()
 
 **Workflow Vignettes**
 
-| Workflow | Vignette | Description |
-|----------|----------|-------------|
-| **SE: Single-Environment** | `vignette("GS4PB_Pipeline", package = "GS4PB")` | End-to-end pipeline for single-environment single-trait (SE:ST) and multi-trait (SE:MT) predictions: VCF loading, QC filtering, imputation, optional training-set optimisation, cross-validation, and GEBV ranking. |
-| **ME: Multi-Environment** | `vignette("GS4PB_ME_Workflow", package = "GS4PB")` | Advanced multi-environment workflow for HPC: ME cross-validation (CV0/CV1/CV2/CV00), leave-one-test-out CV (LOTCV), LOFO prediction with partial masking, multi-trait extension. Includes parallel `foreach` patterns and SLURM setup. |
+| Workflow | Vignette | Preview | Description |
+|----------|----------|---------|-------------|
+| **SE: Single-Environment** | `vignette("GS4PB_Pipeline", package = "GS4PB")` | [View on GitHub](https://github.com/UMN-Lorenz-Group/GS4PB/blob/main/vignettes/GS4PB_Pipeline.Rmd) | End-to-end pipeline for single-environment single-trait (SE:ST) and multi-trait (SE:MT) predictions: VCF loading, QC filtering, imputation, optional training-set optimisation, cross-validation, and GEBV ranking. |
+| **ME: Multi-Environment** | `vignette("GS4PB_ME_Workflow", package = "GS4PB")` | [View on GitHub](https://github.com/UMN-Lorenz-Group/GS4PB/blob/main/vignettes/GS4PB_ME_Workflow.Rmd) | Advanced multi-environment workflow for HPC: ME cross-validation (CV0/CV1/CV2/CV00), leave-one-test-out CV (LOTCV), LOFO prediction with partial masking, multi-trait extension. Includes parallel `foreach` patterns and SLURM setup. |
 
 A copy of the raw executable pipeline script (no prose) is also installed with the package:
 ```R

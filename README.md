@@ -134,12 +134,51 @@ file.edit(system.file("pipeline", "GS4PB_Pipeline.R", package = "GS4PB"))
    The multi-environmental trial data folder contains three files: a genotypic data file in VCF format, a phenotypic data file in '.csv' format and
    location coordinates file for retrieving enviromics (weather) data 
 
-### III. CyVerse Implementation
+### III. Running the App on an HPC Cluster (Singularity / Apptainer)
+
+For users with access to an HPC cluster, GS4PB can be run as a containerised
+Shiny app using [Singularity](https://sylabs.io/singularity/) or
+[Apptainer](https://apptainer.org/) — no Docker or local R installation required.
+
+Full setup instructions and launcher scripts are maintained in a dedicated
+helper repository:
+
+**[GS4PBAppHPCHelp](https://github.com/UMN-Lorenz-Group/GS4PBAppHPCHelp)**
+
+#### Quick Start
+
+1. Clone the helper repository and place the `gs4pb_updated.sif` container
+   image in the same directory:
+   ```bash
+   git clone https://github.com/UMN-Lorenz-Group/GS4PBAppHPCHelp.git
+   cd GS4PBAppHPCHelp
+   # copy or symlink gs4pb_updated.sif here
+   ```
+
+2. Make the launcher script executable and run it:
+   ```bash
+   chmod +x run_app.sh
+   ./run_app.sh
+   ```
+
+3. Access the application at [http://localhost:3838/](http://localhost:3838/).
+
+Configuration options (port, bind address, results directory) are set in
+`config.env`. The script automatically creates an isolated `runtime/`
+directory for container home, tmp, and results.
+
+> **Requirement:** Apptainer or Singularity must be available as a module or
+> system install on your cluster. Check with `which apptainer` or
+> `which singularity`.
+
+---
+
+### IV. CyVerse Implementation
 (Details to be added.)
 
 ---
 
-### IV. Detailed Documentation
+### V. Detailed Documentation
 
 For more information, refer to the wiki page:  
 [GS4PB Wiki Documentation](https://github.com/UMN-Lorenz-Group/GS4PB/wiki)

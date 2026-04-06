@@ -5,6 +5,19 @@
 
 ![GS4PB_Intro](https://github.com/user-attachments/assets/6fb38883-0348-4fbc-a70f-e2130a6b148c)
 
+## Table of Contents
+
+| # | Version | Description |
+|---|---------|-------------|
+| [I](#i-using-the-docker-container) | **Docker Container** | Run the Shiny app via Docker — recommended for most users |
+| [II](#ii-installing-and-using-the-gs4pb-r-package) | **GS4PB R Package** | Install the package in R; run the Shiny app or use functions programmatically in scripts / HPC pipelines |
+| [III](#iii-running-the-app-on-an-hpc-cluster-singularity--apptainer) | **HPC (Singularity / Apptainer)** | Run the containerised Shiny app on an HPC cluster |
+| [IV](#iv-cyverse-implementation) | **CyVerse** | CyVerse cloud implementation *(details coming soon)* |
+| — | [**Trial Data**](#trial-data) | Download example SE and ME datasets |
+| [V](#v-detailed-documentation) | **Detailed Documentation** | Full wiki and function reference |
+
+---
+
 ## Recommended Method to Run the Application
 
 ### I. Using the Docker Container

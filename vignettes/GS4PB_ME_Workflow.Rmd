@@ -509,6 +509,7 @@ cv_me <- getME_CV(
 ## cv_me$results[[trait_idx]] contains per-rep, per-fold predictions
 ## and variance components for models MM, MDs, MDe (and SM for single-env folds)
 cv_me_fit <- cv_me$results[[1]]
+cv_me_summary <- summarize_ME_CV_fits(cv_me_fit, cvMet = cv_met)
 ```
 
 ---

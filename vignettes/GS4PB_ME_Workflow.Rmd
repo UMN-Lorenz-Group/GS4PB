@@ -291,9 +291,180 @@ geno_list <- merged_me[[2]]   # list of genotype matrices, one per trait
 cat("Genotypes in merged data:", length(unique(DT_list[[1]]$Strain)), "\n")
 ```
 
+## 4g — Visualise Phenotype Distributions
+
+Before running CV or prediction, inspect trait distributions per environment to check
+for outliers, skewness, or environments with very few observations.
+
+```{r pheno-dist}
+## Base R boxplot (no extra packages required)
+par(mar = c(9, 4, 3, 1))
+boxplot(value ~ env, data = DT_list[[1]],
+        main = paste(trait_me[1], "— distribution by environment"),
+        xlab = "", ylab = trait_me[1],
+        las  = 2, col = "lightblue")
+title(xlab = "Environment", line = 7)
+
+## ggplot2 violin + boxplot overlay (recommended for many environments)
+library(ggplot2)
+ggplot(DT_list[[1]], aes(x = env, y = value, fill = env)) +
+  geom_violin(alpha = 0.6, trim = FALSE) +
+  geom_boxplot(width = 0.15, outlier.shape = 21, fill = "white") +
+  labs(title = paste(trait_me[1], "distribution by environment"),
+       x = NULL, y = trait_me[1]) +
+  theme_bw(base_size = 13) +
+  theme(axis.text.x   = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+```
+
 ---
 
-# 5 — ME Cross-Validation
+# 5 — Enviromics: Environmental Kinship Matrix (KE)
+
+An environmental kinship matrix (KE) encodes the **climatic similarity** between
+environments.  When supplied to `getME_CV()` or `fitMEModels_LOFO_Pred()`, it enables
+reaction-norm (RN) models that borrow information across climatically similar environments.
+
+**KE is optional.**  If your trial network is small or lacks coordinates, skip this
+section and pass `KE = NULL` (the default) to all downstream functions.
+
+> **Note**: KE is built from NASA POWER weather data and reflects weather-based similarity
+> only.  It does not capture soil type, management practices, or biotic stress.
+
+## 5a — Coordinate File Format
+
+Prepare a CSV with one row per location.  Required columns:
+
+| Column | Description |
+|--------|-------------|
+| `Location` | Short environment label — must match the `env` values in the phenotype file |
+| `Country`  | Country name (used by NASA POWER for geolocation) |
+| `Lat`      | Latitude in decimal degrees |
+| `Long`     | Longitude in decimal degrees |
+
+Optional column: `OtherLocName` — alternative label used by `syncEnvPhenoDat()` when
+phenotype environment names differ from `Location`.
+
+```{r env-coords}
+loc_coord_path <- "<path/to/location_coordinates.csv>"
+loc_coords     <- read.csv(loc_coord_path, stringsAsFactors = FALSE)
+head(loc_coords)
+```
+
+## 5b — Fetch Weather Data (NASA POWER)
+
+`getEnvData()` queries NASA POWER for daily weather data for each location over the
+growing season.  Dates must be `"YYYY-MM-DD"` and cannot extend beyond the current day.
+
+```{r env-data}
+## Set growing season boundaries to match your crop and region
+season_start <- "2023-05-01"
+season_end   <- "2023-10-31"
+
+env_data <- getEnvData(
+  Coord_Data_Tab = loc_coords,
+  startDate      = season_start,
+  endDate        = season_end
+)
+
+## env_data: one row per environment × day
+## Key columns: env, T2M, T2M_MAX, T2M_MIN, PRECTOT, WS2M, RH2M,
+##              T2MDEW, ALLSKY_SFC_SW_DWN, ALLSKY_SFC_LW_DWN
+dim(env_data)
+```
+
+> **Spatial resolution varies by variable**: temperature, humidity, and wind from
+> MERRA-2 (~55 × 70 km); solar radiation from CERES SYN1deg (~111 km); precipitation
+> from GPM IMERG (~10 km).  Environments within the same MERRA-2 grid cell receive
+> near-identical weather values.
+
+## 5c — Build the Environmental Kernel (KE)
+
+`getEnvKernel()` standardises the weather variables into a W matrix and computes an
+n_env × n_env kernel.  The returned list contains `$W` (the kernel matrix).
+
+```{r env-kernel}
+## Linear kernel on raw NASA POWER variables — recommended starting point
+KE <- getEnvKernel(
+  Env.Data = env_data,
+  process  = FALSE,   # FALSE = 9 raw variables; TRUE = 17 EnvRtype-derived variables
+  Gaussian = FALSE    # FALSE = linear kernel;  TRUE = Gaussian kernel
+)
+
+## Inspect the n_env × n_env matrix (values near 1 = similar climate)
+print(round(KE$W, 3))
+```
+
+Kernel options:
+
+| `process` | `Gaussian` | Variables | Kernel |
+|-----------|-----------|-----------|--------|
+| `FALSE` | `FALSE` | 9 raw NASA POWER vars | Linear (default) |
+| `FALSE` | `TRUE`  | 9 raw NASA POWER vars | Gaussian |
+| `TRUE`  | `FALSE` | 17 derived vars (EnvRtype) | Linear |
+| `TRUE`  | `TRUE`  | 17 derived vars (EnvRtype) | Gaussian |
+
+## 5d — Visualise the Environmental Relationship Heatmap
+
+```{r env-heatmap}
+## Saves Environmental_Relationship.png to out_dir and returns the plot object
+plotEnvRel(KE, outDirPath = out_dir)
+```
+
+## 5e — Align Environment Names (Optional)
+
+If your phenotype file uses different environment labels from the `Location` column
+in the coordinates CSV, use `syncEnvPhenoDat()` to remap the KE row/column names via
+the `OtherLocName` column.
+
+```{r env-sync}
+## OtherLoc = TRUE remaps KE row/col names using the OtherLocName column in loc_coords
+KE <- syncEnvPhenoDat(KE       = KE,
+                      LocCoord = loc_coords,
+                      OtherLoc = TRUE)
+```
+
+## 5f — Pass KE to CV and Prediction Functions
+
+Supply `KE` and set `FitEnvModels = TRUE` to activate reaction-norm models.  The
+relevant arguments to change from the `KE = NULL` baseline calls in Sections 6–7:
+
+```{r ke-args}
+## Arguments to add/change in getME_CV() and fitMEModels_LOFO_Pred():
+##   KE             = KE      # supply the environmental kernel
+##   FitEnvModels   = TRUE    # must be TRUE when KE is provided
+
+## Example — getME_CV() with KE:
+cv_me_ke <- getME_CV(
+  DT_1_Filt_List = DT_list,
+  genoDat_List   = geno_list,
+  traits         = trait_me,
+  KG             = NULL,
+  KE             = KE,           # << environmental kernel
+  CVMet          = cv_met,
+  factVar        = env_var_mod,
+  K              = k_folds,
+  NIter          = n_iter,
+  KMethod        = k_method,
+  FitEnvModels   = TRUE,         # << activate KE-based models
+  fixedME        = fix_me,
+  envVar         = env_var_mod,
+  IDColsME       = id_cols_mod,
+  IDColME        = id_col_me,
+  LocME          = loc_me,
+  YrME           = yr_me,
+  b_iter         = bys_iter,
+  b_burnin       = bys_burnin,
+  b_thin         = bys_thin
+)
+
+## For fitMEModels_LOFO_Pred(), add the same two arguments:
+##   GS4PB::fitMEModels_LOFO_Pred(..., KE = KE, FitEnvModels = TRUE, ...)
+```
+
+---
+
+# 6 — ME Cross-Validation
 
 `getME_CV()` fits multi-environment BGGE models under a chosen CV scheme and
 returns fold-level predictions and variance components.
@@ -342,7 +513,7 @@ cv_me_fit <- cv_me$results[[1]]
 
 ---
 
-# 6 — Leave-One-Test-Out Cross-Validation (LOTCV)
+# 7 — Leave-One-Test-Out Cross-Validation (LOTCV)
 
 LOTCV asks: *"How well does the model predict an entirely new test environment,
 given data from all other environments?"*
@@ -352,7 +523,7 @@ from `maskFactrLev` before fitting, then predicts them.  Running one call per
 target factor level (parallelised over test sets) produces a complete LOTCV
 assessment.
 
-## 6a — Identify Target Factor Levels
+## 7a — Identify Target Factor Levels
 
 ```{r lotcv-setup}
 ## All unique levels of the composite factor column (e.g., "2025-T1", "2025-T2")
@@ -366,7 +537,7 @@ cat("Factor levels to predict:", n_targets, "\n")
 print(target_factor_levels)
 ```
 
-## 6b — Run LOTCV in Parallel
+## 7b — Run LOTCV in Parallel
 
 Each parallel task masks one factor level completely (`maskProp = 1`), fits
 MM / MDs / MDe models on the remaining data, and returns predictions for the
@@ -423,7 +594,7 @@ lotcv_results <- foreach(
 names(lotcv_results) <- target_factor_levels
 ```
 
-## 6c — Summarise LOTCV Predictive Ability
+## 7c — Summarise LOTCV Predictive Ability
 
 `getCombinedTab()` merges predictions from all three models (MM, MDs, MDe) and
 observed values into a single wide data frame per factor level.
@@ -469,7 +640,7 @@ print(lotcv_env_cor)
 
 ---
 
-# 7 — LOFO Prediction with Partial Masking
+# 8 — LOFO Prediction with Partial Masking
 
 LOFO prediction (`maskProp < 1`) is appropriate when **some** observations from
 the target environment are available for training — for example, early-season
@@ -477,7 +648,7 @@ data exist but the full harvest is not yet recorded.  The partial-masking regime
 samples `maskProp` of observations as test, fits on the rest, and repeats
 `nSampleReps` times to average out sampling variance.
 
-## 7a — Run LOFO Prediction in Parallel
+## 8a — Run LOFO Prediction in Parallel
 
 ```{r lofo-run}
 n_sample_reps <- 10   # number of partial-mask replicates per factor level
@@ -528,7 +699,7 @@ lofo_pred_results <- foreach(
 names(lofo_pred_results) <- target_factor_levels
 ```
 
-## 7b — Average Predictions Across Sampling Replicates
+## 8b — Average Predictions Across Sampling Replicates
 
 For each factor level, average the replicated predictions from each model across
 `nSampleReps` iterations, then join MM, MDs, MDe into a single table.
@@ -600,7 +771,7 @@ for (i in seq_len(n_targets)) {
 }
 ```
 
-## 7c — Build Final Prediction Table Using Best Model per Environment
+## 8c — Build Final Prediction Table Using Best Model per Environment
 
 For each environment, select the predictions from whichever model had the
 highest correlation.  If no valid correlation exists (e.g., all-NA environment),
@@ -652,7 +823,7 @@ final_env_cor <- final_pred_table %>%
 print(final_env_cor)
 ```
 
-## 7d — Write Outputs
+## 8d — Write Outputs
 
 ```{r lofo-write}
 write.csv(final_pred_table,
@@ -670,7 +841,7 @@ cat("Results written to:", out_dir, "\n")
 
 ---
 
-# 8 — Multi-Trait Extension
+# 9 — Multi-Trait Extension
 
 The ME workflow can be repeated for additional traits.  Traits may differ in how
 the environment is defined — for example, a maturity rating may be grouped by
@@ -727,7 +898,7 @@ geno_list_2 <- merged_me_2[[2]]
 
 ---
 
-# 9 — Tips for HPC Runs
+# 10 — Tips for HPC Runs
 
 **Memory:**  Set `options(java.parameters = "-Xmx30g")` *before* `library(rJava)`.
 Changing it afterwards has no effect.

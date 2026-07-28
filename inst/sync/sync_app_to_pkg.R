@@ -37,7 +37,8 @@
     "getMTCVR", "getRankedPredictedValuesMT", "summarize_MT_Fits"
   ),
   "R/ME_Functions.R" = c(
-    "getMEPred", "stdizePhVarNames", "fitMEModels_LOFO_Pred"
+    "getMEPred", "stdizePhVarNames", "fitMEModels_LOFO_Pred",
+    "summarize_ME_CV_fits", "stdizeCVCovarNames"
   ),
   "R/Imputation_Functions.R" = c(
     "getImputedData_Num", "getImputedData_LDKNNI",
@@ -64,52 +65,68 @@
   which(grepl(pat, lines))
 }
 
-#' Given the index of a `function(` line, find the matching closing `}` line
-#' using brace counting.
-.find_fn_end <- function(lines, start_idx) {
-  depth <- 0L
-  for (i in seq(start_idx, length(lines))) {
-    depth <- depth +
-      nchar(gsub("[^{]", "", lines[[i]])) -
-      nchar(gsub("[^}]", "", lines[[i]]))
-    if (depth == 0L && i > start_idx) return(i)
-    # Handle single-line functions like  f <- function() NULL
-    if (i == start_idx && !grepl("\\{", lines[[i]])) return(i)
+#' Locate a top-level assignment to `fn_name` and return its 1-based
+#' c(start, end) line range, using R's own parser (srcrefs).
+#'
+#' This replaces a brace-counting scan. Counting `{` and `}` per line
+#' mis-detects the closing brace whenever one appears inside a string or a
+#' comment, and the failure is silent: the body is cut short and the truncated
+#' text then overwrites correct package code. Observed in practice —
+#' MT_Functions.R was truncated from 433 lines to 42 (getMTCVR ~184 lines ->
+#' ~20), and summarize_MT_Fits was reported "not in app" although it is
+#' defined in the monolith. Parsing is exact by construction and additionally
+#' reports files that are not valid R instead of mangling them.
+.fn_line_range <- function(lines, fn_name, what = "source") {
+  exprs <- tryCatch(parse(text = lines, keep.source = TRUE),
+                    error = function(e) {
+                      warning("  [!] Could not parse ", what, ": ",
+                              conditionMessage(e))
+                      NULL
+                    })
+  if (is.null(exprs)) return(NULL)
+  srcs <- attr(exprs, "srcref")
+  for (i in seq_along(exprs)) {
+    e <- exprs[[i]]
+    if (is.call(e) && length(e) >= 3L &&
+        as.character(e[[1L]]) %in% c("<-", "=", "<<-") &&
+        is.symbol(e[[2L]]) &&
+        identical(as.character(e[[2L]]), fn_name)) {
+      sr <- srcs[[i]]
+      return(c(start = as.integer(sr[[1L]]), end = as.integer(sr[[3L]])))
+    }
   }
-  NA_integer_
+  NULL
 }
 
 #' Extract a function's signature + body as a character vector of lines
 #' from the monolith text lines.
 .extract_fn_from_lines <- function(lines, fn_name) {
-  starts <- .find_fn_start(lines, fn_name)
-  if (length(starts) == 0L) return(NULL)
-  start <- starts[[1L]]
-  end   <- .find_fn_end(lines, start)
-  if (is.na(end)) {
-    warning("  [!] Could not find closing } for ", fn_name, " (start=", start, ")")
-    return(NULL)
-  }
-  lines[start:end]
+  rng <- .fn_line_range(lines, fn_name, what = paste0("app monolith [", fn_name, "]"))
+  if (is.null(rng)) return(NULL)
+  lines[rng[["start"]]:rng[["end"]]]
 }
 
 #' Replace a function's signature + body in pkg_lines with new_body_lines.
 #' Lines before the function start (roxygen2 block) are preserved.
 .replace_fn_in_lines <- function(pkg_lines, fn_name, new_body_lines) {
-  starts <- .find_fn_start(pkg_lines, fn_name)
-  if (length(starts) == 0L) {
+  rng <- .fn_line_range(pkg_lines, fn_name, what = paste0("package file [", fn_name, "]"))
+  if (is.null(rng)) {
     message("  [not found] ", fn_name, " — not present in package file, skipping")
     return(list(lines = pkg_lines, changed = FALSE))
   }
-  start <- starts[[1L]]
-  end   <- .find_fn_end(pkg_lines, start)
-  if (is.na(end)) {
-    warning("  [!] Could not find closing } for ", fn_name, " in pkg file")
-    return(list(lines = pkg_lines, changed = FALSE))
-  }
+  start <- rng[["start"]]
+  end   <- rng[["end"]]
 
   old_body <- pkg_lines[start:end]
   if (identical(old_body, new_body_lines)) {
+    return(list(lines = pkg_lines, changed = FALSE))
+  }
+
+  ## Safety gate: never write a replacement that is not itself valid R.
+  if (!isTRUE(tryCatch({ parse(text = new_body_lines); TRUE },
+                       error = function(e) FALSE))) {
+    warning("  [!] Refusing to replace ", fn_name,
+            " — extracted text does not parse on its own")
     return(list(lines = pkg_lines, changed = FALSE))
   }
 
@@ -212,8 +229,23 @@ sync_app_to_pkg <- function(
     }
 
     if (file_changed && !dry_run) {
-      writeLines(pkg_lines, pkg_file)
-      cat(sprintf("    => wrote %s\n", rel_path))
+      ## Final gate: the whole rewritten file must parse before it replaces
+      ## working code on disk. Per-function checks can still leave the file as
+      ## a whole broken (e.g. an extraction that swallows a neighbouring
+      ## definition), so validate the end result and refuse to write otherwise.
+      parses <- isTRUE(tryCatch({ parse(text = pkg_lines); TRUE },
+                                error = function(e) {
+                                  warning("  [!] NOT WRITING ", rel_path,
+                                          " — result would not parse: ",
+                                          conditionMessage(e))
+                                  FALSE
+                                }))
+      if (!parses) {
+        cat(sprintf("    => SKIPPED %s (result would not parse)\n", rel_path))
+      } else {
+        writeLines(pkg_lines, pkg_file)
+        cat(sprintf("    => wrote %s\n", rel_path))
+      }
     }
     cat("\n")
   }

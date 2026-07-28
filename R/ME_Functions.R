@@ -3590,3 +3590,32 @@ fitMEModels_CV <- function(DT,genoDat,strainGeno,KG=NULL,KE=NULL,CVMet,k,nIter,m
   return(list(cor_CV_List_Reps,var_CV_List_Reps,fit_Out_CV_List_Reps))
 
 }
+
+## ---- stdizeCVCovarNames (added from app monolith) ----
+
+stdizeCVCovarNames <- function(IDColsME,StrainME,EnvVarME,varEnv_MECV,fix_MECV,factVar_MECV){
+
+	IDColsME[which(IDColsME %in% StrainME)] <- "Strain"
+
+	if(!is.null(EnvVarME)){ ## FIX bug8: wrap both env conditionals in null-guard
+
+		if(varEnv_MECV == EnvVarME){
+			IDColsME[which(IDColsME %in% varEnv_MECV)] <- "Env"
+			varEnv_MECV_Mod <- "Env"
+		}else{ varEnv_MECV_Mod <- varEnv_MECV}
+
+		if(fix_MECV == EnvVarME){
+			IDColsME[which(IDColsME %in% EnvVarME)] <- "Env" ## FIX bug7: use EnvVarME as search key (fix_MECV==EnvVarME here, and prior block may have renamed it)
+			fix_MECV_Mod <- "Env"
+		}else{fix_MECV_Mod <- fix_MECV}
+
+		if(factVar_MECV == EnvVarME){
+			IDColsME[which(IDColsME %in% EnvVarME)] <- "Env" ## FIX bug7: use EnvVarME as search key (fix_MECV==EnvVarME here, and prior block may have renamed it)
+			factVar_MECV_Mod <- "Env"
+		}else{factVar_MECV_Mod <- factVar_MECV}
+
+	} ## end if(!is.null(EnvVarME)) FIX bug8
+
+	return(list(varEnv_MECV_Mod,fix_MECV_Mod,factVar_MECV_Mod,IDColsME)) ## FIX bug6: return IDColsME as third element
+
+}

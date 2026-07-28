@@ -78,9 +78,28 @@ GS4PB can be installed as a standard R package and used either through its Shiny
    reticulate::install_miniconda()
    ```
 
-3. Build and install the package using devtools:
+3. Install the three dependencies that are **not on CRAN**. `devtools::install_deps()`
+   only searches CRAN, so it cannot resolve these and will fail if they are missing.
+   `SummarizedExperiment` comes from Bioconductor; `EnvRtype` and `rTASSEL` from GitHub:
+   ```R
+   if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+   BiocManager::install("SummarizedExperiment")
+
+   if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes")
+   remotes::install_github("allogamous/EnvRtype")
+   remotes::install_github("maize-genetics/rTASSEL")
+   ```
+   `rTASSEL` needs a working Java installation (JDK 11 or later) and `rJava`.
+   From version 0.12.0 it no longer bundles the TASSEL jars; fetch them once with:
+   ```R
+   rTASSEL::setupTASSEL()
+   ```
+
+4. Build and install the package using devtools:
    ```R
    devtools::install_deps(dependencies = TRUE)
+   # Note: bWGR has no binary on CRAN and is compiled from source. Expect a long
+   # build (roughly 15-20 minutes) and allow several GB of RAM for it.
    devtools::document()
    # ℹ Updating GS4PB documentation
    # ℹ Loading GS4PB
@@ -92,7 +111,7 @@ GS4PB can be installed as a standard R package and used either through its Shiny
    devtools::install()
    ```
 
-4. Set up the Python environment (required only for AlphaPlantImpute2 imputation):
+5. Set up the Python environment (required only for AlphaPlantImpute2 imputation):
    ```R
    library(GS4PB)
    GS4PB:::setup_python_env()   # creates the "GS4PB_CondaEnv" conda environment
@@ -110,13 +129,18 @@ Follow the app's guided tabs for sequential pipeline steps.
 
 #### Programmatic / Script Use
 
-GS4PB functions can also be called directly in R scripts — useful for HPC cluster jobs or automated pipelines. Set the Java heap size and initialise rTASSEL before any genotype-loading call:
+GS4PB functions can also be called directly in R scripts — useful for HPC cluster jobs or automated pipelines. Set the Java heap size and start the rTASSEL logger before any genotype-loading call:
 ```R
 options(java.parameters = "-Xmx30g")   # adjust to available RAM
 library(GS4PB)
-rTASSEL::startLogger(fullPath = NULL, fileName = NULL)
-rTASSEL::initializeTASSEL()
+rTASSEL::startLogger()                 # filePath = NULL, verbose = TRUE
 ```
+> **rTASSEL 0.12.0 API note.** Earlier versions of these instructions called
+> `startLogger(fullPath = ..., fileName = ...)` and `initializeTASSEL()`. Neither
+> works on rTASSEL >= 0.12.0: `startLogger()` now takes `filePath` and `verbose`
+> (the old argument names raise `unused arguments`), and `initializeTASSEL()` has
+> been removed — the jar setup it used to cover is handled by `setupTASSEL()`,
+> which only needs to be run once (see installation step 3).
 
 **Workflow Vignettes**
 

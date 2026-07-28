@@ -1828,9 +1828,12 @@ summarize_ME_CV_fits <- function(
 
   if(cvMet != "CV_LOFO"){
     met_data_list <- list()
-    for(m in names(item$models)){
+    model_names_nF <- unique(unlist(lapply(met_dat_list_nF, names)))
+    for(m in model_names_nF){
 
-		   met_data <- do.call(rbind.data.frame,lapply(met_dat_list_nF, function(x) x[[m]]))
+		   fold_dat <- Filter(Negate(is.null), lapply(met_dat_list_nF, function(x) x[[m]]))
+		   if (!length(fold_dat)) next
+		   met_data <- do.call(rbind.data.frame, fold_dat)
 		   met_data_list[[m]] <- met_data
 
 		   # Per-env PA across all folds combined
@@ -1876,16 +1879,18 @@ summarize_ME_CV_fits <- function(
 			 fits_all[[length(fits_all)+1L]] <- tab
 		   }
 	}
-	
-   }else if(cvMet == "CV_LOFO"){ 
-   
+
+   }else if(cvMet == "CV_LOFO"){
+
     met_data_list <- list()
-	
-    for(m in names(item$models)){ 
-		 
-		 met_data <- lapply(met_dat_list_nF, function(x) x[[m]])
+    model_names_nF <- unique(unlist(lapply(met_dat_list_nF, names)))
+
+    for(m in model_names_nF){
+
+		 met_data <- Filter(Negate(is.null), lapply(met_dat_list_nF, function(x) x[[m]]))
+		 if (!length(met_data)) next
 		 met_data_list[[m]] <- met_data
-		 		   
+
 	     met_list <- list()
 		 for(nLev in seq_along(met_data)){	
 		 

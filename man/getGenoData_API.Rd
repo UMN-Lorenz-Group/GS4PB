@@ -4,10 +4,13 @@
 \alias{getGenoData_API}
 \title{Title of getGenoData_API}
 \usage{
-getGenoData_API(FiltGeno)
+getGenoData_API(FiltGeno, outDir = ".")
 }
 \arguments{
 \item{FiltGeno}{Description of FiltGeno.}
+
+\item{outDir}{Directory to write the genotype and marker tables to; see
+\code{\link{apiFilePaths}}.}
 }
 \value{
 Description of what is returned.

@@ -4,10 +4,13 @@
 \alias{getImpGenoData_API}
 \title{Title of getImpGenoData_API}
 \usage{
-getImpGenoData_API(vcfIDTab)
+getImpGenoData_API(vcfIDTab, outDir = ".")
 }
 \arguments{
 \item{vcfIDTab}{Description of vcfIDTab.}
+
+\item{outDir}{Directory holding the imputed genotypes and the marker table;
+see \code{\link{apiFilePaths}}.}
 }
 \value{
 Description of what is returned.

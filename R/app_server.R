@@ -27,7 +27,11 @@
 
 app_server <- function(input, output, session) {
 
-  rTASSEL::startLogger(fullPath = NULL, fileName = NULL)
+  # rTASSEL 0.12.0 signature is startLogger(filePath = NULL, verbose = TRUE).
+  # The pre-0.12 form, startLogger(fullPath = , fileName = ), raises "unused
+  # arguments" — and because this is the first statement in app_server, every
+  # Shiny session died at startup: the UI rendered but nothing worked.
+  rTASSEL::startLogger(filePath = NULL)
 
   # Allow the user to select directories from the home directory or root
   #
@@ -54,6 +58,18 @@ app_server <- function(input, output, session) {
   # Display selected directory path
   output$dir_path <- renderText({
     selected_dir()
+  })
+
+  # Where the AlphaPlantImpute intermediates live — the genotype table, the
+  # marker table, lib.phase and imputed_out.*. See apiFilePaths() for why these
+  # must not sit in the working directory: shiny::runApp() pins that to the app
+  # directory, which in a container is inside the image's writable layer, so the
+  # files never appear in the bind-mounted results folder and are lost with the
+  # container. Falls back to the working directory only when no output directory
+  # has been chosen yet, which preserves the old behaviour for that one case.
+  apiWorkDir <- reactive({
+    d <- outResults_Dir()
+    if (is.null(d) || !nzchar(trimws(d))) getwd() else d
   })
 
   output$pipeline_welcome <- renderText({
@@ -110,8 +126,25 @@ app_server <- function(input, output, session) {
     fp <- genoFile$datapath
 
     # Step 1 (sync, main process): read VCF once — TASSEL object stays in main JVM
-    tas  <- getTasObj(fp)
-    dfmt <- getGenoTas_to_DF(tas)
+    #
+    # rTASSEL throws a Java exception on anything it cannot parse — verified
+    # with a non-VCF file, a non-numeric POS and a header with no markers, all
+    # of which raise IllegalStateException. The tryCatch below covers only the
+    # QC step, so an unhandled error here takes down the session on the first
+    # step of the workflow.
+    loaded <- tryCatch({
+      tas <- getTasObj(fp)
+      list(tas = tas, dfmt = getGenoTas_to_DF(tas))
+    }, error = function(e) {
+      removeNotification("vcf_loading")
+      msg <- paste("Could not read the VCF:", conditionMessage(e))
+      genoLoadMsg(msg)
+      showNotification(msg, type = "error", duration = NULL, session = session)
+      NULL
+    })
+    req(!is.null(loaded))
+    tas  <- loaded$tas
+    dfmt <- loaded$dfmt
     genoTasObj(tas)        # cache — GenoTas() uses this; no second VCF read needed
     genoDF_Data(dfmt)
     genoFilePath(fp)       # signal downstream reactives that geno data is ready
@@ -194,14 +227,14 @@ app_server <- function(input, output, session) {
   hapLibLoaded <- reactiveVal(FALSE)
   hapLibStats <- reactiveVal(NULL)
   
-  observeEvent(input$inHapLib,{ 
+  observeEvent(input$inHapLib,withStepError("Loading the haplotype library", { 
     #browser()
      shinyjs::enable("impute_APIdata")
      hapLibStats(getLibStats(buildLib()))
      hapLibLoaded(TRUE)
-     write.table(buildLib(),"lib.phase",quote=FALSE,sep=" ",row.names=FALSE,col.names=FALSE)
+     write.table(buildLib(),apiFilePaths(apiWorkDir())$libFile,quote=FALSE,sep=" ",row.names=FALSE,col.names=FALSE)
     
-  })
+  }))
  
     
 
@@ -272,7 +305,7 @@ app_server <- function(input, output, session) {
   
 # Start the process in a separate R process
   
-  observeEvent(input$FilterSites, {
+  observeEvent(input$FilterSites, withStepError("Filter 1 statistics", {
     
     temp_file0b(tempfile())
     if(!is.null(GenoFilt1_DF())){
@@ -281,7 +314,7 @@ app_server <- function(input, output, session) {
       sink()
     }
 
-  })
+  }))
   
 ### Test output 
 # Periodically read the file and update the UI
@@ -326,14 +359,14 @@ output$messageGenoFilt1 <- renderText({
   
 # Start the process in a separate R process
   
-  observeEvent(input$FilterTaxa,{
+  observeEvent(input$FilterTaxa,withStepError("Filter 2 statistics", {
     temp_file0c(tempfile())
     if(!is.null(GenoFilt2_DF())){
       sink(temp_file0c())
       cat(getGenoQCStatsFilt2(GenoFilt1_DF(),GenoFilt2_DF(),minNotMissing()))
       sink()
     }
-  })
+  }))
   
 ### Test output 
 # Periodically read the file and update the UI
@@ -415,9 +448,9 @@ output$messageGenoFilt1 <- renderText({
   #})
   
   
-   observeEvent(input$Impute,{
+   observeEvent(input$Impute,withStepError("Reading imputed genotypes", {
      GenoImp_DF1(getGenoTas_to_DF(GenoImp()))
-   })
+   }))
   
   ######## 
   
@@ -426,7 +459,7 @@ output$messageGenoFilt1 <- renderText({
   
   # Start the process in a separate R process
   
-  observeEvent(input$Impute, {
+  observeEvent(input$Impute, withStepError("Imputation statistics", {
     
     temp_file0e(tempfile())
     if(!is.null(GenoImp_DF1())){
@@ -435,7 +468,7 @@ output$messageGenoFilt1 <- renderText({
       sink()
     }
     
-  })
+  }))
   
   ### Test output 
   ## Periodically read the file and update the UI
@@ -464,7 +497,7 @@ output$messageGenoFilt1 <- renderText({
   
  
   
-  observeEvent(input$imputeMet,{
+  observeEvent(input$imputeMet,withStepError("Checking the AlphaPlantImpute Python module", {
     
     if(impMethod()=="AlphaPlantImpute"){ 
       
@@ -566,15 +599,15 @@ output$messageGenoFilt1 <- renderText({
       
     } 
     
-  })
+  }))
   
 ###
   
-  observeEvent(input$imputeMet,{
+  observeEvent(input$imputeMet,withStepError("Preparing genotypes for AlphaPlantImpute", {
     if(impMethod()=="AlphaPlantImpute" && (!is.null(FiltGeno()))){
-      getGenoData_API(FiltGeno())
+      getGenoData_API(FiltGeno(), apiWorkDir())
     }
-  })
+  }))
   
   ####  
   
@@ -609,33 +642,48 @@ output$messageGenoFilt1 <- renderText({
   rProcess <- eventReactive(input$build_library,{
     # Path for the temporary file
     temp_file(tempfile())
-    
+
+    # File paths are resolved here and passed in: the worker is a separate R
+    # process and must not depend on where its working directory happens to be.
+    apiPaths <- apiFilePaths(apiWorkDir())
+
+    if (!file.exists(apiPaths$genoFile)) {
+      showNotification(paste0(
+        "Cannot build the haplotype library: no '", basename(apiPaths$genoFile),
+        "' in ", apiPaths$dir, ". Load and filter genotypes, then re-select ",
+        "AlphaPlantImpute as the imputation method."),
+        type = "error", duration = 15)
+      req(FALSE)
+    }
+
     # Start the process in a separate R process
-    callr::r_bg(function(nHap, nSampRnds, HDthresh, temp_file) {
+    callr::r_bg(function(nHap, nSampRnds, HDthresh, temp_file, genoFile, libPrefix) {
       library(reticulate)
       library(GS4PB)
       # reticulate::use_virtualenv("./renv/python/virtualenvs/renv-python-3.12", required = TRUE)
-      
-      reticulate::use_condaenv("GS4PB_CondaEnv", required = TRUE)  
-      
+
+      reticulate::use_condaenv("GS4PB_CondaEnv", required = TRUE)
+
       sys <- reticulate::import("sys")
       api2 <- reticulate::import("alphaplantimpute2.alphaplantimpute2")
-      
-      sys$argv <- c('alphaplantimpute2', '-createlib', '-out', 'lib',
-                    '-genotypes', 'current_GenoTable.genotypes',
+
+      sys$argv <- c('alphaplantimpute2', '-createlib', '-out', libPrefix,
+                    '-genotypes', genoFile,
                     '-n_haplotypes', as.character(nHap),
                     '-n_sample_rounds', as.character(nSampRnds),
                     '-hd_threshold', as.character(HDthresh),
                     '-seed', '42')
-      
+
       sink(temp_file)
       tryCatch({
         api2$main()
       }, finally = {
         sink(NULL)
       })
-    }, args = list(nHap(), nSampRnds(), HDthresh(), temp_file()), stdout = temp_file(), stderr = temp_file())
-    
+    }, args = list(nHap(), nSampRnds(), HDthresh(), temp_file(),
+                   apiPaths$genoFile, apiPaths$libPrefix),
+       stdout = temp_file(), stderr = temp_file())
+
   })
    
 ###
@@ -663,12 +711,27 @@ output$messageGenoFilt1 <- renderText({
       if(file.exists(temp_file())){
         lines <- readLines(temp_file(), warn = FALSE)
         txt <- paste(lines, collapse = "\n")
+
+        # "No longer alive" is not "succeeded". callr exits non-zero when the
+        # worker died, and the status survives the kill() above. Without this
+        # a failed build announced "Build Completed" and unlocked the impute
+        # step. Verified: R error -> 1, Python sys.exit() through reticulate
+        # -> 1, clean run -> 0.
+        status <- tryCatch(rProcess()$get_exit_status(),
+                           error = function(e) NA_integer_)
+        if (!identical(status, 0L)) {
+          failTxt <- paste(txt, apiFailureNote("Haplotype library build", status, lines),
+                           sep = "\n")
+          mssgAPIBuildOut(failTxt)
+          return(failTxt)
+        }
+
         # Mark process as complete and update output
         processComplete(TRUE)
         shinyjs::enable("impute_APIdata")
       	# Ensure the background process is terminated
-        mssgAPIBuildOut(paste(txt, "Build Completed", collapse = "\n"))
-        return(paste(txt, "Build Completed", collapse = "\n"))
+        mssgAPIBuildOut(paste(txt, "Build Completed", sep = "\n"))
+        return(paste(txt, "Build Completed", sep = "\n"))
       }
       return("Waiting for output...")
     }
@@ -707,37 +770,58 @@ output$messageGenoFilt1 <- renderText({
     # Path for the temporary file
     
     temp_file2(tempfile())
-    
+
+    # As in the build step: resolve the paths in the app and hand them to the
+    # worker, which has no reason to share this process's working directory.
+    apiPaths <- apiFilePaths(apiWorkDir())
+
+    # The genotype table and the library are written by two different steps, so
+    # changing the output directory between them would leave them apart. Say so
+    # here rather than letting the Python side fail with a bare file-not-found.
+    missingFiles <- c(apiPaths$genoFile, apiPaths$libFile)
+    missingFiles <- missingFiles[!file.exists(missingFiles)]
+    if (length(missingFiles)) {
+      showNotification(paste0(
+        "Cannot impute: missing ", paste(basename(missingFiles), collapse = " and "),
+        " in ", apiPaths$dir, ". If the output directory changed after the ",
+        "haplotype library was built, rebuild it (or re-upload the .phase file) ",
+        "so both files sit together."),
+        type = "error", duration = 15)
+      req(FALSE)
+    }
+
     # Start the process in a separate R process
-    callr::r_bg(function(founder_file,temp_file){
+    callr::r_bg(function(founder_file,temp_file,genoFile,libFile,impPrefix){
       library(reticulate)
       library(GS4PB)
       reticulate::use_condaenv("GS4PB_CondaEnv")
       #reticulate::use_virtualenv("./renv/python/virtualenvs/renv-python-3.12", required = TRUE)
       sys <- import("sys")
       api2 <- import("alphaplantimpute2.alphaplantimpute2")
-      
+
       if(is.null(founder_file)){
-        sys$argv <- c('alphaplantimpute2', '-impute', '-out', 'imputed_out',
-                      '-genotypes', 'current_GenoTable.genotypes',
-                      '-libphase','lib.phase'
+        sys$argv <- c('alphaplantimpute2', '-impute', '-out', impPrefix,
+                      '-genotypes', genoFile,
+                      '-libphase', libFile
         )
       }else {
-        sys$argv <- c('alphaplantimpute2', '-impute', '-out', 'imputed_out',
-                      '-genotypes', 'current_GenoTable.genotypes',
+        sys$argv <- c('alphaplantimpute2', '-impute', '-out', impPrefix,
+                      '-genotypes', genoFile,
                       '-founders', as.character(founder_file),
-                      '-libphase','lib.phase'
+                      '-libphase', libFile
         )
       }
-      
+
       sink(temp_file)
       tryCatch({
         api2$main()
       }, finally = {
         sink(NULL)
       })
-    }, args = list(founder_file,temp_file2()), stdout = temp_file2(), stderr = temp_file2())
-    
+    }, args = list(founder_file,temp_file2(),
+                   apiPaths$genoFile,apiPaths$libFile,apiPaths$impPrefix),
+       stdout = temp_file2(), stderr = temp_file2())
+
   })
   
   mssgAPIImputeOut <- reactiveVal(NULL)
@@ -769,11 +853,25 @@ output$messageGenoFilt1 <- renderText({
       if(file.exists(temp_file2())){
         lines <- readLines(temp_file2(), warn = FALSE)
         txt <- paste(lines, collapse = "\n")
+
+        # As in processStatus(): a dead worker is not a finished one. This is
+        # what let a founders file naming individuals absent from the haplotype
+        # library report "Imputation Completed", which set process2Complete()
+        # -> outputRead() -> a read of a stale imputed_out.genotypes, and took
+        # the session down.
+        status <- tryCatch(rProcess2()$get_exit_status(),
+                           error = function(e) NA_integer_)
+        if (!identical(status, 0L)) {
+          failTxt <- paste(txt, apiFailureNote("Imputation", status, lines), sep = "\n")
+          mssgAPIImputeOut(failTxt)
+          return(failTxt)
+        }
+
         # Mark process as complete and update output
         process2Complete(TRUE)
         # Ensure the background process is terminated
-        mssgAPIImputeOut(paste(txt, "Imputation Completed", collapse = "\n"))
-        return(paste(txt, "Imputation Completed", collapse = "\n"))
+        mssgAPIImputeOut(paste(txt, "Imputation Completed", sep = "\n"))
+        return(paste(txt, "Imputation Completed", sep = "\n"))
       }
       return("Waiting for output...")
     }
@@ -838,7 +936,17 @@ output$messageGenoFilt1 <- renderText({
   
   observe({
     req(outputRead()) # Ensure output has been marked as read
-    ImpGeno <- getImpGenoData_API()  # Retrieve imputed genotype data
+    # An unhandled error in an observer takes the whole session down — the user
+    # loses every loaded dataset, not just this step. Report and stop.
+    ImpGeno <- tryCatch(
+      getImpGenoData_API(outDir = apiWorkDir()),  # Retrieve imputed genotype data
+      error = function(e) {
+        showNotification(paste("Could not read the imputed genotypes:",
+                               conditionMessage(e)),
+                         type = "error", duration = NULL)
+        NULL
+      })
+    req(!is.null(ImpGeno))
     GenoImp_DF2(ImpGeno)
     
   })
@@ -850,7 +958,7 @@ output$messageGenoFilt1 <- renderText({
 # Start the process in a separate R process
   
  
-  observe({ 
+  observe(withStepError("Imputation statistics", { 
     
     temp_file0e2(tempfile())
     if(!is.null(GenoImp_DF2())){
@@ -858,7 +966,7 @@ output$messageGenoFilt1 <- renderText({
       cat(getGenoImp1Stats(Geno_DF(),GenoImp_DF2()))
       sink()
     }
-  })
+  }))
   
 ### Test output 
 ## Periodically read the file and update the UI
@@ -939,12 +1047,12 @@ output$messageGenoFilt1 <- renderText({
 
   pcaResult <- reactiveVal(NULL)
 
-  observeEvent(input$RunPCA, {
+  observeEvent(input$RunPCA, withStepError("PC analysis", {
     req(pcGenoTable())
     withProgress(message="Running PC Analysis...", value=0, {
       pcaResult(getGenoPC(pcGenoTable(), input$nPCsComp))
     })
-  })
+  }))
 
   pcaDF <- reactive({
     req(pcaResult())
@@ -1775,7 +1883,7 @@ temp_file4 <- reactiveVal('none')
 envData <- reactiveVal(NULL)
 
 
-observeEvent(input$getEnvData,{
+observeEvent(input$getEnvData,withStepError("Fetching environmental covariates", {
   # Path for the temporary file
 # browser()
   temp_file4(tempfile())
@@ -1790,7 +1898,7 @@ observeEvent(input$getEnvData,{
     
     envData(envDat)
   }
-})
+}))
 
 ### Test output 
 # Periodically read the file and update the UI
@@ -1826,21 +1934,21 @@ processWthDat <- reactive(input$processWth)
 
  
  EnvK <- reactiveVal(NULL)
- observeEvent(input$getEnvK,{
+ observeEvent(input$getEnvK,withStepError("Environmental kernel", {
    #browser()
     withProgress(message='Estimating Environmental Relationships',value=0,{
       EnvK(getEnvKernel(envData(),processWthDat(),gaussVar())) 
       
     })
- })
+ }))
 
 
 
  EnvK_Mod <- reactiveVal(NULL)
 
- observeEvent(input$OtherLoc,{
+ observeEvent(input$OtherLoc,withStepError("Syncing environmental and phenotypic data", {
           EnvK_Mod(syncEnvPhenoDat(EnvK(),LocCoords(),OtherLoc()))
- })
+ }))
 
 
 OtherLoc <- reactive(input$OtherLoc)
@@ -2188,8 +2296,8 @@ output$messageMergedGenoME <- renderText({
         txt <- paste(lines, collapse = "\n")
         processComplete4b(TRUE)
         TSOptOutputTab(rProcess4b()$get_result()) 
-        SEOptTSMssg(paste(txt, "\n Computations completed", collapse = "\n"))
-        return(paste(txt, "\n Computations completed", collapse = "\n"))
+        SEOptTSMssg(paste(txt, "Computations completed", sep = "\n"))
+        return(paste(txt, "Computations completed", sep = "\n"))
       } else {
         return("Waiting for output...")
       }
@@ -2528,8 +2636,8 @@ output$messageMergedGenoME <- renderText({
          
          processComplete5a(TRUE)
          cvrOutputListST(rProcess5a()$get_result()) /
-           STCVMssg(paste(txt, "\n Cross Validation Completed", collapse = "\n"))  
-           return(paste(txt, "\n Cross Validation Completed", collapse = "\n"))
+           STCVMssg(paste(txt, "Cross Validation Completed", sep = "\n"))  
+           return(paste(txt, "Cross Validation Completed", sep = "\n"))
          
        }else {
          return("Waiting for output...")
@@ -2625,8 +2733,8 @@ output$messageMergedGenoME <- renderText({
         txt <- paste(lines, collapse = "\n")
         processComplete5b(TRUE)
         cvrOutputListMT(rProcess5b()$get_result()) /
-        MTCVMssg(paste(txt,"\n","Cross Validation Completed", collapse = "\n"))
-        return(paste(txt,"\n","Cross Validation Completed", collapse = "\n"))
+        MTCVMssg(paste(txt, "Cross Validation Completed", sep = "\n"))
+        return(paste(txt, "Cross Validation Completed", sep = "\n"))
       } else {
         return("Waiting for output...")
       }
@@ -2879,8 +2987,8 @@ output$messageMergedGenoME <- renderText({
         processComplete6(TRUE)
         MECV_Out(rProcess6()$get_result())
         # CV_out_Tab(CV_out_Tab()+1)
-        MECVMssg(paste(txt, "Cross Validation Completed", collapse = "\n"))
-        return(paste(txt, "Cross Validation Completed", collapse = "\n"))
+        MECVMssg(paste(txt, "Cross Validation Completed", sep = "\n"))
+        return(paste(txt, "Cross Validation Completed", sep = "\n"))
       } else {
         return("Waiting for output...")
       }
@@ -2918,22 +3026,22 @@ output$messageMergedGenoME <- renderText({
   },colnames=TRUE,rownames=TRUE)
   
   
-  observe({ 
+  observe(withStepError("Writing cross-validation output", { 
     req(cvrOutputListST())
     #browser()
     if(!is.null(cvrOutputListST())){
       writeCVOutTable(cvrOutputListST(),"ST",outResults_Dir())
       
     }
-  })
+  }))
   
-  observe({ 
+  observe(withStepError("Writing cross-validation output", { 
     req(cvrOutputListMT())
     if(!is.null(cvrOutputListMT())){
       writeCVOutTable(cvrOutputListMT(),"MT",outResults_Dir())
     
     }
-  })
+  }))
   
  
   
@@ -2947,27 +3055,27 @@ output$messageMergedGenoME <- renderText({
   
   
   
-  observe({ 
+  observe(withStepError("Writing GP output", { 
     req(gpOutputListST())
     
     if(!is.null(gpOutputListST())){
       writeGPOutTable(gpOutputListST(),"ST",outResults_Dir())
       
     }
-  })
+  }))
     
 
-  observe({ 
+  observe(withStepError("Writing GP output", { 
     req(gpOutputListMT())
     
     if(!is.null(gpOutputListMT())){
       writeGPOutTable(gpOutputListMT(),"MT",outResults_Dir())
       
     }
-  }) 
+  })) 
   
   
-  observe({ 
+  observe(withStepError("Writing output tables", { 
     req(outputListMETab())
     
     if(!is.null(outputListMETab())){
@@ -2976,7 +3084,7 @@ output$messageMergedGenoME <- renderText({
       write.table(as.data.frame(outputListMETab()),oFNME, row.names = FALSE,sep="\t")
       
     }
-  }) 
+  })) 
   
 
 ## & CV_run_Tab()==CV_out_Tab() & CV_run_Tab()==CV_out_Tab()
@@ -3255,8 +3363,8 @@ output$emCVRME <- renderTable({
         txt <- paste(lines, collapse = "\n")
         processComplete7a(TRUE)
         gpOutputListST(rProcess7a()$get_result()) 
-        STGPMssg(paste(txt, "\n Computations Completed", collapse = "\n"))
-          return(paste(txt, "\n Computations Completed", collapse = "\n"))
+        STGPMssg(paste(txt, "Computations Completed", sep = "\n"))
+          return(paste(txt, "Computations Completed", sep = "\n"))
       } else {
         return("Waiting for output...")
       }
@@ -3386,8 +3494,8 @@ output$emCVRME <- renderTable({
         txt <- paste(lines, collapse = "\n")
         processComplete7b(TRUE)
         gpOutputListMT(rProcess7b()$get_result()) 
-        MTGPMssg(paste(txt, "\n Computations completed", collapse = "\n"))
-        return(paste(txt, "\n Computations completed", collapse = "\n"))
+        MTGPMssg(paste(txt, "Computations completed", sep = "\n"))
+        return(paste(txt, "Computations completed", sep = "\n"))
       } else {
         return("Waiting for output...")
       }
@@ -3666,8 +3774,8 @@ output$emCVRME <- renderTable({
         txt <- paste(lines, collapse = "\n")
         processComplete7c(TRUE)
         gpOutputListSTME(rProcess7c()$get_result()) 
-        STMEGPMssg(paste(txt, "\n Computations completed", collapse = "\n"))
-        return(paste(txt, "\n Computations completed", collapse = "\n"))
+        STMEGPMssg(paste(txt, "Computations completed", sep = "\n"))
+        return(paste(txt, "Computations completed", sep = "\n"))
       } else {
         return("Waiting for output...")
       }
@@ -4014,7 +4122,7 @@ output$emCVRME <- renderTable({
   })
 
   # Step 1: QC Filtering
-  observeEvent(input$RunKinQC, {
+  observeEvent(input$RunKinQC, withStepError("Kinship QC filtering", {
     req(kinGenoTable())
     withProgress(message = "Running QC Filtering...", value = 0, {
       kinQCResult(getQCFilteredM(
@@ -4027,7 +4135,7 @@ output$emCVRME <- renderTable({
         impute           = input$kinImpute
       ))
     })
-  })
+  }))
 
   output$kinQCMsg    <- renderText({ req(kinQCResult()); kinQCResult()$msg })
   output$kinQCHeteroz <- renderPlot({ req(kinQCResult()); print(kinQCResult()$plot.heteroz) },   bg="white")
@@ -4042,13 +4150,13 @@ output$emCVRME <- renderTable({
   )
 
   # Step 2: G Matrix Estimation
-  observeEvent(input$RunGmat, {
+  observeEvent(input$RunGmat, withStepError("G matrix estimation", {
     req(kinQCResult())
     kinDedupResult(NULL)   # reset dedup when G is re-estimated
     withProgress(message = "Estimating G Matrix...", value = 0, {
       kinGmatResult(getGmat(kinQCResult()$M.clean, method = input$kinGmethod))
     })
-  })
+  }))
 
   output$kinGmatMsg <- renderText({ req(kinGmatResult()); kinGmatResult()$msg })
 
@@ -4067,13 +4175,13 @@ output$emCVRME <- renderTable({
   )
 
   # Step 3a: Kinship Diagnostics
-  observeEvent(input$RunKinDiag, {
+  observeEvent(input$RunKinDiag, withStepError("Kinship diagnostics", {
     req(kinGmatResult())
     kinDedupResult(NULL)   # reset dedup when diagnostics are re-run
     withProgress(message = "Running Kinship Diagnostics...", value = 0, {
       kinDiagResult(getKinshipDiag(kinGmatResult()$G, duplicate.thr = input$kinDupThr))
     })
-  })
+  }))
 
   output$kinDiagMsg     <- renderText({ req(kinDiagResult()); kinDiagResult()$msg })
   output$kinDiagPlot    <- renderPlot({ req(kinDiagResult()); print(kinDiagResult()$plot.diag) },    bg="white")
@@ -4094,14 +4202,14 @@ output$emCVRME <- renderTable({
   }, striped = TRUE, hover = TRUE, bordered = TRUE)
 
   # Step 3a-extra: Remove Duplicates from G
-  observeEvent(input$RemoveDuplicates, {
+  observeEvent(input$RemoveDuplicates, withStepError("Duplicate removal", {
     req(kinDiagResult())
     dup <- kinDiagResult()$list.duplicate
     G   <- kinGmatResult()$G
     withProgress(message = "Removing duplicate individuals from G...", value = 0, {
       kinDedupResult(removeDuplicatesFromG(G, dup))
     })
-  })
+  }))
 
   output$kinDedupMsg <- renderText({
     req(kinDedupResult())
@@ -4117,7 +4225,7 @@ output$emCVRME <- renderTable({
   )
 
   # Step 3b: Fine-tune G
-  observeEvent(input$RunKinTune, {
+  observeEvent(input$RunKinTune, withStepError("G matrix tuning", {
     req(kinGmatResult())
     req(input$kinTuneMethod != "none")
     withProgress(message = "Fine-tuning G Matrix...", value = 0, {
@@ -4127,7 +4235,7 @@ output$emCVRME <- renderTable({
         pblend = input$kinPblend
       ))
     })
-  })
+  }))
 
   output$kinTuneMsg         <- renderText({
     req(kinTuneResult())
@@ -4159,14 +4267,14 @@ output$emCVRME <- renderTable({
   }, bg="white")
 
   # Step 3c: Kinship PCA
-  observeEvent(input$RunKinPCA, {
+  observeEvent(input$RunKinPCA, withStepError("Kinship PCA", {
     G <- if (!is.null(kinTuneResult())) kinTuneResult()$Gb else {
       req(kinGmatResult()); kinGmatResult()$G
     }
     withProgress(message = "Running Kinship PCA...", value = 0, {
       kinPCAResult(getKinshipPCA(G, ncp = input$kinNcp))
     })
-  })
+  }))
 
   output$kinPCAScree <- renderPlot({
     req(kinPCAResult())
@@ -4240,7 +4348,7 @@ output$emCVRME <- renderTable({
   
   outResults_Dir <- reactiveVal(NULL)
   
-  observe({
+  observe(withStepError("Writing the session log", {
     
    
     sessionID <- substring(session$token,1,10)
@@ -4403,7 +4511,7 @@ output$emCVRME <- renderTable({
       # file.copy(log_file, output_path, overwrite = TRUE)
       
       
-  }) 
+  })) 
     
 
 }

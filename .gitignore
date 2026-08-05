@@ -1,0 +1,19 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+.claude/
+
+# AlphaPlantImpute intermediates. These used to be written to the working
+# directory, which is how they ended up here; they now go to the run's output
+# directory, but ignore them so an older checkout cannot commit one.
+current_GenoTable.genotypes
+currentVCFIDTab.txt
+lib.phase
+imputed_out.*
+
+# rTASSEL / BGLR run artefacts
+rtassel_log.txt
+rTASSEL_log
+*.dat
+*.out

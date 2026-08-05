@@ -575,8 +575,82 @@ output$messageGenoFilt1 <- renderText({
             ),
         ),
         tags$br(),
-        
-        
+
+        # Run options shared by both steps. Names and defaults follow cher 3
+        # of the AlphaPlantImpute2 1.5.3 manual.
+        fluidRow(
+          box(width = 12, title = tags$strong(tags$h3("AlphaPlantImpute Run Options")),
+              solidHeader = TRUE, status = "primary", collapsible = TRUE,
+              fluidRow(
+                column(3,
+                  checkboxInput("apiOverwrite",
+                                "Keep observed genotypes (-overwrite)", value = TRUE),
+                  helpText(tags$small(
+                    "On (recommended): only missing calls are imputed. Off is the",
+                    "AlphaPlantImpute default, which replaces EVERY genotype with the",
+                    "model's call - observed ones included - so real alleles absent",
+                    "from the haplotype library are lost."))
+                ),
+                column(3,
+                  numericInput("apiSeed", "Random seed (-seed)", value = 42, min = 0, step = 1),
+                  helpText(tags$small(
+                    "Leave blank for an unseeded run. A seed forces single-threaded",
+                    "analysis: AlphaPlantImpute resets -maxthreads to 1 when both are set."))
+                ),
+                column(3,
+                  numericInput("apiMaxThreads", "Analysis threads (-maxthreads)",
+                               value = 1, min = 1, step = 1),
+                  helpText(tags$small("Manual default: 1."))
+                ),
+                column(3,
+                  numericInput("apiIOThreads", "I/O threads (-iothreads)",
+                               value = 1, min = 1, step = 1),
+                  helpText(tags$small(
+                    "Manual default: 1. Above 1 is only recommended for very large",
+                    "files (>10,000 individuals)."))
+                )
+              ),
+              tags$hr(),
+              checkboxInput("apiUseDefaults",
+                            "Other default parameters - leave every remaining AlphaPlantImpute parameter at its default value",
+                            value = TRUE),
+              conditionalPanel(
+                condition = "input.apiUseDefaults == false",
+                helpText(tags$small(tags$em(
+                  "Values below are the manual's defaults; anything you change is passed explicitly."))),
+                fluidRow(
+                  column(3, numericInput("apiCallThresh", "Calling threshold (-calling_threshold)",
+                                         value = 0.1, min = 0, max = 1, step = 0.05),
+                            helpText(tags$small("Default 0.1; below 0.25 gives best-guess genotypes."))),
+                  column(3, numericInput("apiNWindows", "Windows (-n_windows)",
+                                         value = 5, min = 1, step = 1),
+                            helpText(tags$small("Default 5. Windows for targeted haplotype sampling."))),
+                  column(3, numericInput("apiError", "Genotyping error rate (-error)",
+                                         value = 0.01, min = 0, max = 1, step = 0.005),
+                            helpText(tags$small("Default 0.01."))),
+                  column(3, numericInput("apiRecomb", "Recombination rate (-recomb)",
+                                         value = 1, min = 0, step = 0.5),
+                            helpText(tags$small("Per chromosome. Default 1.")))
+                ),
+                fluidRow(
+                  column(6, radioButtons("apiHMM", "HMM type",
+                                         choices = c("Diploid (default)" = "diploid",
+                                                     "Haploid (-haploid)" = "haploid",
+                                                     "Joint (-joint)"     = "joint"),
+                                         selected = "diploid", inline = TRUE)),
+                  column(6, checkboxInput("apiIncorrectLoci",
+                                          "Report incorrectly sampled loci when building the library (-incorrect_loci)",
+                                          value = FALSE),
+                            helpText(tags$small(
+                              "Diagnostic: average loci mis-sampled from the HMM. Smaller is better;",
+                              "if more sample rounds do not reduce it, raise the number of haplotypes.")))
+                )
+              )
+          )
+        ),
+        tags$br(),
+
+
        fluidRow(
             
         box(width=6,title="API Build Status",solidHeader=TRUE,status="info",
@@ -637,6 +711,53 @@ output$messageGenoFilt1 <- renderText({
   nHap <- reactive(input$nHap)
   nSampRnds <- reactive(input$nSampRnds)
   HDthresh <- reactive(input$HDthresh)
+
+  # -- AlphaPlantImpute command-line options (manual chapter 3) ---------------
+  #
+  # These inputs live inside output$APIUI, which only renders once
+  # AlphaPlantImpute is selected, so every one of them can be NULL here. Each
+  # accessor falls back to the manual's default rather than emitting a bad flag.
+  numArg <- function(flag, value, default = NULL) {
+    if (is.null(value) || length(value) != 1 || is.na(value)) {
+      if (is.null(default)) return(character(0)) else value <- default
+    }
+    c(flag, format(value, scientific = FALSE, trim = TRUE))
+  }
+
+  # Options that mean the same thing to -createlib and -impute.
+  apiCommonArgs <- reactive({
+    a <- numArg("-seed", input$apiSeed)          # blank seed => unseeded run
+    a <- c(a, numArg("-maxthreads", input$apiMaxThreads))
+    a <- c(a, numArg("-iothreads",  input$apiIOThreads))
+    if (isTRUE(input$apiUseDefaults)) return(a)  # nothing else passed explicitly
+    a <- c(a, numArg("-calling_threshold", input$apiCallThresh),
+              numArg("-error", input$apiError),
+              numArg("-recomb", input$apiRecomb))
+    if (identical(input$apiHMM, "haploid")) a <- c(a, "-haploid")
+    if (identical(input$apiHMM, "joint"))   a <- c(a, "-joint")
+    a
+  })
+
+  apiBuildArgs <- reactive({
+    a <- apiCommonArgs()
+    # -incorrect_loci is documented as a library-building diagnostic only.
+    if (!isTRUE(input$apiUseDefaults) && isTRUE(input$apiIncorrectLoci))
+      a <- c(a, "-incorrect_loci")
+    a
+  })
+
+  apiImputeArgs <- reactive({
+    a <- apiCommonArgs()
+    # -overwrite restores observed calls at non-missing loci. Without it
+    # AlphaPlantImpute replaces every genotype with its HMM call, which silently
+    # discards alleles that are absent from the haplotype library. Default here
+    # is on, the opposite of the tool's own default.
+    if (!identical(input$apiOverwrite, FALSE)) a <- c(a, "-overwrite")
+    # -n_windows drives targeted haplotype sampling, which only runs at
+    # imputation time.
+    if (!isTRUE(input$apiUseDefaults)) a <- c(a, numArg("-n_windows", input$apiNWindows))
+    a
+  })
   processComplete <- reactiveVal(FALSE)
    
   rProcess <- eventReactive(input$build_library,{
@@ -657,7 +778,7 @@ output$messageGenoFilt1 <- renderText({
     }
 
     # Start the process in a separate R process
-    callr::r_bg(function(nHap, nSampRnds, HDthresh, temp_file, genoFile, libPrefix) {
+    callr::r_bg(function(nHap, nSampRnds, HDthresh, temp_file, genoFile, libPrefix, extraArgs) {
       library(reticulate)
       library(GS4PB)
       # reticulate::use_virtualenv("./renv/python/virtualenvs/renv-python-3.12", required = TRUE)
@@ -672,7 +793,7 @@ output$messageGenoFilt1 <- renderText({
                     '-n_haplotypes', as.character(nHap),
                     '-n_sample_rounds', as.character(nSampRnds),
                     '-hd_threshold', as.character(HDthresh),
-                    '-seed', '42')
+                    extraArgs)
 
       sink(temp_file)
       tryCatch({
@@ -681,7 +802,7 @@ output$messageGenoFilt1 <- renderText({
         sink(NULL)
       })
     }, args = list(nHap(), nSampRnds(), HDthresh(), temp_file(),
-                   apiPaths$genoFile, apiPaths$libPrefix),
+                   apiPaths$genoFile, apiPaths$libPrefix, apiBuildArgs()),
        stdout = temp_file(), stderr = temp_file())
 
   })
@@ -791,7 +912,7 @@ output$messageGenoFilt1 <- renderText({
     }
 
     # Start the process in a separate R process
-    callr::r_bg(function(founder_file,temp_file,genoFile,libFile,impPrefix){
+    callr::r_bg(function(founder_file,temp_file,genoFile,libFile,impPrefix,extraArgs){
       library(reticulate)
       library(GS4PB)
       reticulate::use_condaenv("GS4PB_CondaEnv")
@@ -799,18 +920,12 @@ output$messageGenoFilt1 <- renderText({
       sys <- import("sys")
       api2 <- import("alphaplantimpute2.alphaplantimpute2")
 
-      if(is.null(founder_file)){
-        sys$argv <- c('alphaplantimpute2', '-impute', '-out', impPrefix,
-                      '-genotypes', genoFile,
-                      '-libphase', libFile
-        )
-      }else {
-        sys$argv <- c('alphaplantimpute2', '-impute', '-out', impPrefix,
-                      '-genotypes', genoFile,
-                      '-founders', as.character(founder_file),
-                      '-libphase', libFile
-        )
-      }
+      argv <- c('alphaplantimpute2', '-impute', '-out', impPrefix,
+                '-genotypes', genoFile,
+                '-libphase', libFile)
+      if(!is.null(founder_file))
+        argv <- c(argv, '-founders', as.character(founder_file))
+      sys$argv <- c(argv, extraArgs)
 
       sink(temp_file)
       tryCatch({
@@ -819,7 +934,8 @@ output$messageGenoFilt1 <- renderText({
         sink(NULL)
       })
     }, args = list(founder_file,temp_file2(),
-                   apiPaths$genoFile,apiPaths$libFile,apiPaths$impPrefix),
+                   apiPaths$genoFile,apiPaths$libFile,apiPaths$impPrefix,
+                   apiImputeArgs()),
        stdout = temp_file2(), stderr = temp_file2())
 
   })

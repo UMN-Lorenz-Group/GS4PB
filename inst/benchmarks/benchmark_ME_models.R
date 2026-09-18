@@ -75,8 +75,10 @@ cfg <- list(
   taxa_min_called = 0.60,
   ldknni_l = 30L, ldknni_k = 10L,
 
-  ## Cross-validation. CV1 = novel genotypes, CV2 = novel cells, CV0 = novel
-  ## environments (one fold per environment; k_folds is ignored for CV0).
+  ## Cross-validation, split by the package's getTstIndices_CV_Data():
+  ##   CV1  novel genotypes         CV2  novel cells (each genotype stays observed)
+  ##   CV0  novel environments      CV00 novel genotypes x novel environments
+  ## CV0/CV00 use one fold per environment; k_folds applies to CV1/CV2.
   cv_schemes = strsplit(Sys.getenv("GS4PB_BENCH_SCHEMES",
                           unset = if (QUICK) "CV1" else "CV1,CV2"), ",")[[1]],
   k_folds    = as.integer(Sys.getenv("GS4PB_BENCH_FOLDS", unset = if (QUICK) "3" else "5")),
@@ -273,21 +275,30 @@ des <- build_designs(dat, cfg)
 
 ## ---- 3. Cross-validation folds ---------------------------------------------
 
+## The folds come from the package's own splitter, getTstIndices_CV_Data(),
+## the one getME_CV() uses and that has been validated against the app, so a
+## result here is comparable to a result from the app. It is internal (not
+## exported), hence the `:::`. Its CV2 is not "random cells": each genotype's
+## rows are spread across folds so every genotype stays observed somewhere,
+## and single-observation genotypes are never masked.
+##
 ## Returns, for each replicate, a list of integer vectors: the DT rows held out
 ## in each fold. Every model in a run sees exactly these rows as test cells.
 make_folds <- function(DT, scheme, k, n_reps, seed) {
-  lapply(seq_len(n_reps), function(r) {
-    set.seed(seed + r)
-    if (scheme == "CV1") {          # novel genotypes: all of a gid's cells held out
-      g <- unique(DT$gid); fold_of_gid <- sample(rep(seq_len(k), length.out = length(g)))
-      names(fold_of_gid) <- g
-      split(seq_len(nrow(DT)), fold_of_gid[DT$gid])
-    } else if (scheme == "CV2") {   # novel cells: random cells held out
-      split(seq_len(nrow(DT)), sample(rep(seq_len(k), length.out = nrow(DT))))
-    } else if (scheme == "CV0") {   # novel environments: one env per fold
-      split(seq_len(nrow(DT)), DT$env)
-    } else stop("Unknown CV scheme: ", scheme)
-  })
+  stopifnot(scheme %in% c("CV1", "CV2", "CV0", "CV00"))
+  ## CV0 folds over environments; one fold per environment makes it a genuine
+  ## leave-one-environment-out whatever k_folds says. CV00 keeps k_folds: it
+  ## masks a share of the genotypes that appear in BOTH the held-out and the
+  ## training environments, and the splitter refuses a fold with too few such
+  ## cells — on a thinly connected trial (each line in 1-2 environments) that
+  ## can be every fold, in which case the scheme is skipped below.
+  if (scheme == "CV0") k <- length(unique(DT$env))
+  sp <- utils::capture.output(
+    out <- GS4PB:::getTstIndices_CV_Data(DT, CVMet = scheme, nIter = n_reps, k = k,
+                                         id_col = "gid", env_col = "env", y_col = "y",
+                                         base_seed = seed))
+  ## Drop empty folds (CV2 can produce them when few rows are maskable).
+  lapply(out$test_idx, function(rep_folds) Filter(length, rep_folds))
 }
 
 ## ---- 4. Model fitters --------------------------------------------------------
@@ -368,20 +379,35 @@ fit_one <- function(y_masked, spec, des, cfg, dat) {
 
 ## ---- 5. Run every (scheme, rep, fold, model) ---------------------------------
 
+fold_sets <- setNames(lapply(cfg$cv_schemes, function(sch)
+  make_folds(dat$DT, sch, cfg$k_folds, cfg$n_reps, cfg$seed)), cfg$cv_schemes)
+for (sch in cfg$cv_schemes) {
+  n_test <- vapply(fold_sets[[sch]][[1]], length, 1L)
+  if (!length(n_test)) {
+    cat(sprintf("[folds] %-4s produced NO test cells — the splitter found nothing it could mask\n",
+                sch), "        under this scheme on this trial design; skipping it.\n")
+    next
+  }
+  cat(sprintf("[folds] %-4s rep 1: %d folds, test cells per fold %s (of %d)\n",
+              sch, length(n_test), paste(n_test, collapse = "/"), nrow(dat$DT)))
+}
+empty <- vapply(fold_sets, function(f) all(lengths(f) == 0), TRUE)
+fold_sets <- fold_sets[!empty]; cfg$cv_schemes <- names(fold_sets)
+if (!length(cfg$cv_schemes)) stop("No CV scheme produced any test cells; nothing to run.")
+
 tasks <- do.call(rbind, lapply(cfg$cv_schemes, function(sch) {
-  folds <- make_folds(dat$DT, sch, cfg$k_folds, cfg$n_reps, cfg$seed)
+  folds <- fold_sets[[sch]]
   do.call(rbind, lapply(seq_along(folds), function(r)
     do.call(rbind, lapply(seq_along(folds[[r]]), function(f)
       data.frame(scheme = sch, rep = r, fold = f, model = cfg$models,
                  stringsAsFactors = FALSE)))))
 }))
-## CV0 holds out whole environments; a wide-format solver has nothing to
+## CV0/CV00 hold out whole environments; a wide-format solver has nothing to
 ## estimate for an all-NA column, so those combinations are skipped, not failed.
-skip <- tasks$scheme == "CV0" & vapply(tasks$model, function(m) MODEL_SPECS[[m]]$family == "bWGR", TRUE)
-if (any(skip)) cat(sprintf("[run] skipping %d bWGR x CV0 tasks (whole-environment hold-out)\n", sum(skip)))
+skip <- tasks$scheme %in% c("CV0", "CV00") &
+        vapply(tasks$model, function(m) MODEL_SPECS[[m]]$family == "bWGR", TRUE)
+if (any(skip)) cat(sprintf("[run] skipping %d bWGR x CV0/CV00 tasks (whole-environment hold-out)\n", sum(skip)))
 tasks <- tasks[!skip, ]
-fold_sets <- setNames(lapply(cfg$cv_schemes, function(sch)
-  make_folds(dat$DT, sch, cfg$k_folds, cfg$n_reps, cfg$seed)), cfg$cv_schemes)
 
 cat(sprintf("[run] %d tasks (%d models) on %d workers\n", nrow(tasks), length(cfg$models), cfg$n_workers))
 registerDoParallel(cfg$n_workers)
@@ -428,6 +454,14 @@ pred_ok <- pred_df[pred_df$status == "ok", ]
 ## lines at a site, so correlations are computed per environment and then
 ## averaged, not pooled across environments (pooling rewards a model that
 ## merely gets the environment means right).
+##
+## Under CV0 read only the correlation. A held-out environment's fixed effect
+## is unidentifiable from the training data, so every model's predictions for
+## it carry an arbitrary level shift: rankings survive, RMSE does not (it was
+## ~16 vs ~6 under CV1/CV2 on PYT23). The marker x environment models are hit
+## harder still — their environment-specific blocks for the unseen environment
+## are sampled from the prior and add noise, where the kernel models' block
+## structure shrinks that term towards zero.
 metric_rows <- function(d) {
   ok <- is.finite(d$obs) & is.finite(d$pred)
   n  <- sum(ok)

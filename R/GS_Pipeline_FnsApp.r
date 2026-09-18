@@ -8,6 +8,7 @@
 #'
 #' @importFrom vcfR read.vcfR extract.gt getFIX
 #' @importFrom dplyr select rename left_join as_tibble mutate
+#' @importFrom dplyr %>%
 #' @return Description of what is returned.
 #' @examples
 #' \dontrun{

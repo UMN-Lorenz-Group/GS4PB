@@ -343,6 +343,17 @@ make_folds <- function(DT, scheme, k, n_reps, seed) {
 ## every row of DT, in DT order. Test predictions are then picked out by index,
 ## so the fitters never see which rows are being scored.
 
+## A fit's RNG seed, derived from the strings that identify it. A polynomial
+## rolling hash rather than an index, so the seed does not shift when models are
+## added, removed, or run as a subset; and all arithmetic stays well inside
+## double's exact-integer range, so it is identical on every platform.
+str_seed <- function(...) {
+  chars <- utf8ToInt(paste(..., sep = "|"))
+  h <- 0
+  for (ch in chars) h <- (h * 31 + ch) %% 2147483647
+  as.integer(h)
+}
+
 kernel_list <- function(des, kernel, model) {
   K <- des[[kernel]]
   out <- list(KG = list(Kernel = K$KG, Type = "D"))
@@ -456,14 +467,24 @@ results <- foreach(i = seq_len(nrow(tasks)), .packages = c("BGGE", "BGLR", "bWGR
   spec <- MODEL_SPECS[[tk$model]]
   test <- fold_sets[[tk$scheme]][[tk$rep]][[tk$fold]]
   y_masked <- dat$DT$y; y_masked[test] <- NA
+
+  ## Seed each fit from what identifies it. Without this the folds were
+  ## reproducible but the chains were not, so re-running the same configuration
+  ## moved a model's correlation by ~0.02 under CV1 and much more under CV0 —
+  ## enough to reorder models that are genuinely tied. Deriving the seed from
+  ## the task tuple (rather than from the loop index) keeps a fit's result the
+  ## same whether it runs alone, in a subset, or in a different worker order.
+  fit_seed <- str_seed(cfg$seed, tk$scheme, tk$rep, tk$fold, tk$model)
+  set.seed(fit_seed)
+
   t0 <- proc.time()[["elapsed"]]
   pred <- tryCatch(fit_one(y_masked, spec, des, cfg, dat),
                    error = function(e) structure(conditionMessage(e), class = "fit_error"))
   secs <- proc.time()[["elapsed"]] - t0
   if (inherits(pred, "fit_error"))
-    return(data.frame(tk, status = "error", error = unclass(pred), secs = secs,
+    return(data.frame(tk, status = "error", error = unclass(pred), secs = secs, seed = fit_seed,
                       uniqID = NA, gid = NA, env = NA, obs = NA, pred = NA))
-  data.frame(tk, status = "ok", error = "", secs = secs,
+  data.frame(tk, status = "ok", error = "", secs = secs, seed = fit_seed,
              uniqID = dat$DT$uniqID[test], gid = dat$DT$gid[test], env = dat$DT$env[test],
              obs = dat$DT$y[test], pred = pred[test], row.names = NULL)
 }
@@ -474,8 +495,13 @@ cat(sprintf("[run] done in %.1f min\n", (proc.time() - t_all)[["elapsed"]] / 60)
 ## task that failed outside the tryCatch; normalise those too.
 results <- lapply(seq_along(results), function(i) {
   r <- results[[i]]
-  if (inherits(r, "error")) data.frame(tasks[i, ], status = "error", error = conditionMessage(r),
-                                       secs = NA, uniqID = NA, gid = NA, env = NA, obs = NA, pred = NA)
+  ## Must carry the same columns as the success path, including `seed`, or the
+  ## rbind below fails — and it would fail only on a run that already had a
+  ## worker die, turning one broken fit into a lost run.
+  if (inherits(r, "error"))
+    data.frame(tasks[i, ], status = "error", error = conditionMessage(r), secs = NA_real_,
+               seed = str_seed(cfg$seed, tasks$scheme[i], tasks$rep[i], tasks$fold[i], tasks$model[i]),
+               uniqID = NA, gid = NA, env = NA, obs = NA, pred = NA)
   else r
 })
 pred_df <- do.call(rbind, results)

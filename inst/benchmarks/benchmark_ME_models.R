@@ -54,9 +54,18 @@ QUICK <- identical(Sys.getenv("GS4PB_BENCH_QUICK"), "1")
 ## ---- 0. Configuration -------------------------------------------------------
 
 cfg <- list(
-  ## Paths. GS4PB_BENCH_DATA overrides the data directory (e.g. a Docker mount).
-  data_dir = Sys.getenv("GS4PB_BENCH_DATA",
-                        unset = "C:/Users/vramasub/Desktop/UMN_GIT/Genotyping_Data/MultiEnv_Trial_Data"),
+  ## Paths. Set GS4PB_BENCH_DATA; the fallbacks are only a convenience for the
+  ## machines this was developed on, and none of them exist on a cluster.
+  data_dir = local({
+    d <- Sys.getenv("GS4PB_BENCH_DATA", unset = "")
+    if (nzchar(d)) d else {
+      cand <- c("/data/MultiEnv_Trial_Data",
+                "C:/Users/vramasub/Desktop/UMN_GIT/Genotyping_Data/MultiEnv_Trial_Data",
+                file.path(dirname(dirname(getwd())), "Genotyping_Data", "MultiEnv_Trial_Data"))
+      hit <- cand[dir.exists(cand)]
+      if (length(hit)) hit[1] else ""
+    }
+  }),
   vcf_file   = "CB2019_Lorenz_PYT2023_mergedVCF_SNPs_multiAlleleAny.vcf",
   pheno_file = "PYT23_BLUEs_Locwise_4Traits_V3.csv",
   out_dir    = Sys.getenv("GS4PB_BENCH_OUT", unset = "benchmark_ME_out"),
@@ -107,9 +116,25 @@ cfg <- list(
     else NULL   # NULL = every entry in MODEL_SPECS
   }),
 
-  n_workers = max(1L, min(parallel::detectCores() - 1L,
-                          as.integer(Sys.getenv("GS4PB_BENCH_WORKERS", unset = "8"))))
+  ## Worker count. Under SLURM, detectCores() reports the whole node, not the
+  ## cores the job was allocated, so a 4-core allocation would happily start 8
+  ## workers and thrash. SLURM_CPUS_PER_TASK is the allocation and wins when
+  ## present; GS4PB_BENCH_WORKERS overrides everything.
+  n_workers = local({
+    explicit <- Sys.getenv("GS4PB_BENCH_WORKERS", unset = "")
+    slurm    <- Sys.getenv("SLURM_CPUS_PER_TASK", unset = "")
+    n <- if (nzchar(explicit)) as.integer(explicit)
+         else if (nzchar(slurm)) as.integer(slurm)
+         else max(1L, parallel::detectCores() - 1L)
+    max(1L, n)
+  })
 )
+
+## Each worker runs its own BGGE/BGLR fit, and the BLAS underneath would in turn
+## spawn a thread per core — n_workers x n_threads processes fighting over the
+## allocation. Pin the BLAS to one thread unless the caller said otherwise.
+for (v in c("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"))
+  if (!nzchar(Sys.getenv(v))) do.call(Sys.setenv, setNames(list("1"), v))
 
 dir.create(cfg$out_dir, showWarnings = FALSE, recursive = TRUE)
 cat(sprintf("== GS4PB ME benchmark %s==\n  out: %s | workers: %d | schemes: %s | folds: %d x reps: %d\n",
@@ -164,7 +189,12 @@ prep_path <- file.path(cfg$out_dir, "prepared_data.rds")
 prepare_data <- function(cfg) {
   vcf_path   <- file.path(cfg$data_dir, cfg$vcf_file)
   pheno_path <- file.path(cfg$data_dir, cfg$pheno_file)
-  for (f in c(vcf_path, pheno_path)) if (!file.exists(f)) stop("Not found: ", f)
+  if (!nzchar(cfg$data_dir))
+    stop("No input data directory. Set GS4PB_BENCH_DATA to the folder holding ",
+         cfg$vcf_file, " and ", cfg$pheno_file, ".", call. = FALSE)
+  for (f in c(vcf_path, pheno_path))
+    if (!file.exists(f))
+      stop("Not found: ", f, "\n  (GS4PB_BENCH_DATA = '", cfg$data_dir, "')", call. = FALSE)
 
   cat("[prep] VCF -> rTASSEL\n")
   tas     <- getTasObj(vcf_path)
@@ -257,6 +287,7 @@ build_designs <- function(dat, cfg) {
   ##   MM : K_G = Zg G Zg'
   ##   MDs: + K_G o (Ze Ze')           one GxE kernel, block-diagonal by env
   ##   MDe: + K_G o (Ze_i Ze_i')       one kernel per environment
+
   obs_kernels <- function(G) {
     KG  <- Zg %*% G %*% t(Zg)
     KGE <- KG * tcrossprod(Ze)
@@ -264,11 +295,12 @@ build_designs <- function(dat, cfg) {
     names(KGE_env) <- dat$envs
     list(KG = KG, KGE = KGE, KGE_env = KGE_env)
   }
+
   list(Ze = Ze, Zg = Zg, ne = ne,
        GB = obs_kernels(G_GB), GK = obs_kernels(G_GK),
        G_GB = G_GB, G_GK = G_GK,
        Xn = Zg %*% dat$Xc)                     # n x p marker matrix in obs order
-}
+} 
 
 cat("[kernels] building designs and kernels ...\n")
 des <- build_designs(dat, cfg)
@@ -284,6 +316,7 @@ des <- build_designs(dat, cfg)
 ##
 ## Returns, for each replicate, a list of integer vectors: the DT rows held out
 ## in each fold. Every model in a run sees exactly these rows as test cells.
+
 make_folds <- function(DT, scheme, k, n_reps, seed) {
   stopifnot(scheme %in% c("CV1", "CV2", "CV0", "CV00"))
   ## CV0 folds over environments; one fold per environment makes it a genuine
@@ -294,12 +327,15 @@ make_folds <- function(DT, scheme, k, n_reps, seed) {
   ## can be every fold, in which case the scheme is skipped below.
   if (scheme == "CV0") k <- length(unique(DT$env))
   sp <- utils::capture.output(
+    
     out <- GS4PB:::getTstIndices_CV_Data(DT, CVMet = scheme, nIter = n_reps, k = k,
                                          id_col = "gid", env_col = "env", y_col = "y",
                                          base_seed = seed))
   ## Drop empty folds (CV2 can produce them when few rows are maskable).
   lapply(out$test_idx, function(rep_folds) Filter(length, rep_folds))
-}
+} 
+
+
 
 ## ---- 4. Model fitters --------------------------------------------------------
 ##
@@ -333,7 +369,7 @@ fit_BGLR_RKHS <- function(y_masked, spec, des, cfg) {
                    burnIn = cfg$mcmc$burnIn, thin = cfg$mcmc$thin,
                    saveAt = tempfile("bglr_"), verbose = FALSE)
   as.numeric(fm$yHat)
-}
+}  
 
 fit_BGLR_marker <- function(y_masked, spec, des, cfg) {
   ETA <- list(env = list(X = des$Ze[, -1, drop = FALSE], model = "FIXED"),
@@ -363,9 +399,9 @@ fit_bWGR <- function(y_masked, spec, des, cfg, dat) {
     MEGA     = bWGR::MEGA(Y, dat$Xc),
     SEM      = bWGR::SEM(Y, dat$Xc),
     stop("Unknown bWGR solver: ", spec$solver))
-  hat <- fit$hat
-  dimnames(hat) <- dimnames(Y)
-  as.numeric(hat[cbind(dat$DT$gid, dat$DT$env)])
+    hat <- fit$hat
+    dimnames(hat) <- dimnames(Y)
+    as.numeric(hat[cbind(dat$DT$gid, dat$DT$env)])
 }
 
 fit_one <- function(y_masked, spec, des, cfg, dat) {
@@ -402,6 +438,7 @@ tasks <- do.call(rbind, lapply(cfg$cv_schemes, function(sch) {
       data.frame(scheme = sch, rep = r, fold = f, model = cfg$models,
                  stringsAsFactors = FALSE)))))
 }))
+
 ## CV0/CV00 hold out whole environments; a wide-format solver has nothing to
 ## estimate for an all-NA column, so those combinations are skipped, not failed.
 skip <- tasks$scheme %in% c("CV0", "CV00") &
@@ -535,4 +572,7 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
 cat("\n== Overall (mean within-env cor across fits; higher is better) ==\n")
 print(format(overall_df[c("scheme", "model", "cor_mean", "cor_sd", "rmse_mean", "secs_mean")],
              digits = 3), row.names = FALSE)
-cat("\nOutputs in", normalizePath(cfg$out_dir), "\n")
+cat("\nOutputs in", normalizePath(cfg$out_dir), "\n") 
+
+
+

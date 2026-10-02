@@ -1,0 +1,7 @@
+# core.autocrlf=true checks files out with CRLF on Windows. A shell script
+# copied from such a checkout to a Linux cluster fails with errors like
+# "$'\r': command not found", or sbatch rejecting the #SBATCH block. Keep
+# anything destined for Linux as LF in the working tree too.
+*.sh    text eol=lf
+*.slurm text eol=lf
+Dockerfile* text eol=lf

@@ -1765,6 +1765,12 @@ summarize_ME_CV_fits <- function(
  
   # --- accumulators ---
   metrics_all <- list(); var_all <- list(); fits_all <- list(); env_metrics_all <- list()
+  ## Folds that did not fit. Collected rather than skipped in silence: a failed
+  ## fold used to leave no trace at all, so ME CV returned zero-row tables and
+  ## the app showed empty output with nothing in the log, while the full BGGE
+  ## sampling cost had already been paid. fitMEModels_CV_fits now carries the
+  ## condition through as item$error; this is what makes it visible.
+  failed_folds <- list()
 
   nReps <- length(fit_obj$results)
   N     <- fit_obj$nrow
@@ -1774,11 +1780,19 @@ summarize_ME_CV_fits <- function(
     folds <- fit_obj$results[[irep]]$folds
     nFolds <- length(folds)
 	met_dat_list_nF <- list()
-	
+
     for (fold in seq_len(nFolds)) {
       item <- folds[[fold]]
-      if (!length(item) || is.null(item$status) || item$status != "ok") next
-      
+      if (!length(item) || is.null(item$status) || item$status != "ok") {
+        failed_folds[[length(failed_folds)+1L]] <- data.frame(
+          replicate = irep, fold = fold,
+          reason = if (!length(item) || is.null(item$status)) "no result returned"
+                   else if (!is.null(item$error)) trimws(as.character(item$error)[1])
+                   else paste0("status '", item$status, "', no message recorded"),
+          stringsAsFactors = FALSE)
+        next
+      }
+
 	  tst_idx <- as.integer(item$tst_idx)
       
 	  # clamp to valid DT rows
@@ -2000,12 +2014,31 @@ metrics_summary$model <- factor(level_mapping_mod[metrics_summary$model])
 
  print(metrics_summary)
 
+  ## Report the folds that failed. One warning for the whole run, listing each
+  ## distinct message once with the folds it hit, so a systematic failure reads
+  ## as one line rather than k x nIter repetitions of it. Returned as
+  ## failed_folds too, so a caller can inspect without parsing the warning.
+  failed_df <- if (length(failed_folds)) do.call(rbind, failed_folds) else
+               data.frame(replicate = integer(0), fold = integer(0),
+                          reason = character(0), stringsAsFactors = FALSE)
+  if (nrow(failed_df)) {
+    n_total <- sum(vapply(fit_obj$results, function(r) length(r$folds), integer(1)))
+    by_reason <- tapply(seq_len(nrow(failed_df)), failed_df$reason, function(ix)
+      paste0(failed_df$replicate[ix], ":", failed_df$fold[ix], collapse = ", "))
+    warning(sprintf(
+      "%d of %d ME CV folds did not fit; their results are missing from these summaries.\n%s",
+      nrow(failed_df), n_total,
+      paste0("  rep:fold ", unname(by_reason), "\n    -> ", names(by_reason),
+             collapse = "\n")), call. = FALSE)
+  }
+
   list(
     metrics_long     = metrics_long,
     env_metrics_long = env_metrics_long,
     var_long         = var_long,
     fits_long        = fits_long,
     metrics_summary  = metrics_summary,
+    failed_folds     = failed_df,
     cv               = fit_obj$cv
   )
 
@@ -2119,7 +2152,8 @@ idx <- as.data.frame(idx)
       cvFactVar = FactVar, Reaction, method, intcpt.rand=FALSE,
       dimension_KE = dimension_KE, bandwidth = bandwidth, quantil = quantil,
       b_iter = b_iter, b_burnin = b_burnin, b_thin = b_thin,
-      b_tol = b_tol, b_R2 = b_R2, b_digits = b_digits
+      b_tol = b_tol, b_R2 = b_R2, b_digits = b_digits,
+      store_full_fits = store_full_fits
     )
     list(
       status = "ok",
@@ -2160,6 +2194,7 @@ idx <- as.data.frame(idx)
 	  for (it in items){
 		fold_list[[it$fold]] <- list(
 		  status = it$status,
+		  error  = it$error,
 		  models = it$models,
 		  raw    = it$raw,
 		  tst_idx = it$tst_idx
@@ -2190,7 +2225,7 @@ idx <- as.data.frame(idx)
 # helper to fit one fold and return predictions + VC (not raw fits unless asked)
  
   
-  fit_DTfold <- function(DT_fold,genoDat,trait, KG, KE,fixedCovar,cvFactVar=NULL,Reaction, method,intcpt.rand=FALSE,dimension_KE=NULL,bandwidth = 1,quantil = 0.5,b_iter = 1000,b_burnin = 200,b_thin = 10,b_tol = 1e-10,b_R2 = 0.5, b_digits = 4) {
+  fit_DTfold <- function(DT_fold,genoDat,trait, KG, KE,fixedCovar,cvFactVar=NULL,Reaction, method,intcpt.rand=FALSE,dimension_KE=NULL,bandwidth = 1,quantil = 0.5,b_iter = 1000,b_burnin = 200,b_thin = 10,b_tol = 1e-10,b_R2 = 0.5, b_digits = 4,store_full_fits = FALSE) {
     
 	print("fit_fold_in")
 	Y   <- DT_fold[, c("env","gid","value")]

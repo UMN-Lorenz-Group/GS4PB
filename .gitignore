@@ -17,3 +17,13 @@ rtassel_log.txt
 rTASSEL_log
 *.dat
 *.out
+
+# ME-GP benchmarks. Scripts AND their inputs live together under
+# inst/benchmarks so the folder can be copied to MSI as one self-contained
+# unit, which puts ~18 MB of genotype/phenotype/enviromics data in the tree
+# (a 13 MB VCF among it). None of it belongs in the package or in git history,
+# so the whole folder is ignored and reaches the cluster by rsync/scp:
+#   rsync -av inst/benchmarks/ user@msi:/scratch.global/user/pyt25_bench/code/
+# Note this ignores the SCRIPTS too, by request. If they should be versioned
+# later, un-ignore them individually and keep only data/ ignored.
+inst/benchmarks/
